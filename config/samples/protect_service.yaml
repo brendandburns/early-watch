@@ -1,0 +1,36 @@
+---
+# Example ChangeGuard that prevents a Service from being deleted while
+# Pods matching its label selector are still running.
+#
+# Apply this alongside a Service named "my-service" that has:
+#   spec:
+#     selector:
+#       app: my-app
+#
+# Once applied, any DELETE on a Service in the "default" namespace will be
+# denied if Pods matching spec.selector still exist.
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeGuard
+metadata:
+  name: protect-service-from-deletion
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""     # core API group
+    resource: services
+  operations:
+    - DELETE
+  rules:
+    - name: no-matching-pods
+      type: ExistingResources
+      existingResources:
+        apiGroup: ""   # core API group
+        resource: pods
+        # Read the label selector from the Service's spec.selector field
+        # and use it to query for matching Pods.
+        labelSelectorFromField: spec.selector
+        sameNamespace: true
+      message: >
+        This Service cannot be deleted because Pods that match its label
+        selector are still running. Scale down or delete the matching Pods
+        before removing the Service.

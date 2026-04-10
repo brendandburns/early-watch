@@ -1,0 +1,312 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: changeguards.earlywatch.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+spec:
+  group: earlywatch.io
+  names:
+    kind: ChangeGuard
+    listKind: ChangeGuardList
+    plural: changeguards
+    singular: changeguard
+    shortNames:
+      - cg
+    categories:
+      - earlywatch
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Resource
+          type: string
+          jsonPath: .spec.subject.resource
+        - name: Operations
+          type: string
+          jsonPath: .spec.operations
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >
+            ChangeGuard is the Schema for the changeguards API.
+            A ChangeGuard defines a set of safety rules that the EarlyWatch
+            admission controller evaluates before allowing a change to a
+            Kubernetes resource.
+          type: object
+          properties:
+            apiVersion:
+              description: >
+                APIVersion defines the versioned schema of this representation
+                of an object. Servers should convert recognized schemas to the
+                latest internal value, and may reject unrecognized values.
+              type: string
+            kind:
+              description: >
+                Kind is a string value representing the REST resource this
+                object represents.
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: ChangeGuardSpec defines the desired state of ChangeGuard.
+              type: object
+              required:
+                - subject
+                - operations
+                - rules
+              properties:
+                subject:
+                  description: >
+                    Subject describes the Kubernetes resource that this guard
+                    watches.
+                  type: object
+                  required:
+                    - resource
+                  properties:
+                    apiGroup:
+                      description: >
+                        APIGroup is the API group for the resource, e.g. ""
+                        for core, "apps" for Deployments.
+                      type: string
+                    resource:
+                      description: >
+                        Resource is the plural resource name, e.g. "services",
+                        "deployments".
+                      type: string
+                    namespaceSelector:
+                      description: >
+                        NamespaceSelector optionally restricts this guard to
+                        namespaces that match the given label selector. When
+                        omitted the guard applies to all namespaces.
+                      type: object
+                      properties:
+                        matchExpressions:
+                          description: matchExpressions is a list of label selector requirements.
+                          type: array
+                          items:
+                            description: >
+                              A label selector requirement is a selector that
+                              contains values, a key, and an operator that
+                              relates the key and values.
+                            type: object
+                            required:
+                              - key
+                              - operator
+                            properties:
+                              key:
+                                description: key is the label key that the selector applies to.
+                                type: string
+                              operator:
+                                description: >
+                                  operator represents a key's relationship to
+                                  a set of values.
+                                type: string
+                              values:
+                                description: values is an array of string values.
+                                type: array
+                                items:
+                                  type: string
+                        matchLabels:
+                          description: >
+                            matchLabels is a map of {key,value} pairs. A
+                            single {key,value} in the matchLabels map is
+                            equivalent to an element of matchExpressions.
+                          type: object
+                          additionalProperties:
+                            type: string
+                operations:
+                  description: >
+                    Operations is the list of admission operations this guard
+                    intercepts. Valid values are: CREATE, UPDATE, DELETE,
+                    CONNECT.
+                  type: array
+                  minItems: 1
+                  items:
+                    description: OperationType represents a Kubernetes admission operation.
+                    type: string
+                    enum:
+                      - CREATE
+                      - UPDATE
+                      - DELETE
+                      - CONNECT
+                rules:
+                  description: >
+                    Rules is the list of safety checks to evaluate when an
+                    intercepted operation is received. All rules are
+                    evaluated; if any rule is violated the request is denied.
+                  type: array
+                  minItems: 1
+                  items:
+                    description: GuardRule is a single safety check within a ChangeGuard.
+                    type: object
+                    required:
+                      - name
+                      - type
+                      - message
+                    properties:
+                      name:
+                        description: Name is a human-readable identifier for this rule.
+                        type: string
+                      type:
+                        description: Type selects the kind of check to perform.
+                        type: string
+                        enum:
+                          - ExistingResources
+                          - ExpressionCheck
+                      message:
+                        description: >
+                          Message is the human-readable denial message
+                          returned to the user when this rule is violated.
+                        type: string
+                      existingResources:
+                        description: >
+                          ExistingResources configures a check that queries
+                          the cluster for resources related to the subject
+                          and denies the request when any matching resources
+                          are found. Required when type is ExistingResources.
+                        type: object
+                        required:
+                          - resource
+                        properties:
+                          apiGroup:
+                            description: >
+                              APIGroup is the API group of the dependent
+                              resource. Use "" for core resources such as
+                              Pods.
+                            type: string
+                          resource:
+                            description: >
+                              Resource is the plural name of the dependent
+                              resource type, e.g. "pods", "replicasets".
+                            type: string
+                          labelSelectorFromField:
+                            description: >
+                              LabelSelectorFromField is a dot-separated JSON
+                              path into the subject resource's spec that
+                              contains a map[string]string to use as a label
+                              selector when querying dependent resources.
+                              For example, "spec.selector" reads the selector
+                              from a Service.
+                            type: string
+                          labelSelector:
+                            description: >
+                              LabelSelector is a static label selector used
+                              when querying dependent resources. Mutually
+                              exclusive with labelSelectorFromField.
+                            type: object
+                            properties:
+                              matchExpressions:
+                                type: array
+                                items:
+                                  type: object
+                                  required:
+                                    - key
+                                    - operator
+                                  properties:
+                                    key:
+                                      type: string
+                                    operator:
+                                      type: string
+                                    values:
+                                      type: array
+                                      items:
+                                        type: string
+                              matchLabels:
+                                type: object
+                                additionalProperties:
+                                  type: string
+                          sameNamespace:
+                            description: >
+                              SameNamespace, when true, restricts the lookup
+                              to the same namespace as the subject resource.
+                              Defaults to true.
+                            type: boolean
+                            default: true
+                      expressionCheck:
+                        description: >
+                          ExpressionCheck evaluates a CEL expression against
+                          the admission request and denies the request when
+                          the expression returns true. Required when type is
+                          ExpressionCheck.
+                        type: object
+                        required:
+                          - expression
+                        properties:
+                          expression:
+                            description: >
+                              Expression is a Common Expression Language
+                              (CEL) expression. The expression receives the
+                              admission request object as "request" and must
+                              return a boolean. When true, the request is
+                              denied.
+                            type: string
+            status:
+              description: ChangeGuardStatus defines the observed state of ChangeGuard.
+              type: object
+              properties:
+                conditions:
+                  description: >
+                    Conditions represent the latest available observations of
+                    the ChangeGuard's current state.
+                  type: array
+                  items:
+                    description: Condition contains details for one aspect of the current state of this API Resource.
+                    type: object
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    properties:
+                      lastTransitionTime:
+                        description: >
+                          lastTransitionTime is the last time the condition
+                          transitioned from one status to another.
+                        type: string
+                        format: date-time
+                      message:
+                        description: >
+                          message is a human readable message indicating
+                          details about the transition.
+                        type: string
+                        maxLength: 32768
+                      observedGeneration:
+                        description: >
+                          observedGeneration represents the .metadata.generation
+                          that the condition was set based upon.
+                        type: integer
+                        format: int64
+                        minimum: 0
+                      reason:
+                        description: reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        type: string
+                        maxLength: 1024
+                        minLength: 1
+                        pattern: '^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$'
+                      status:
+                        description: status of the condition, one of True, False, Unknown.
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                      type:
+                        description: type of condition in CamelCase.
+                        type: string
+                        maxLength: 316
+                        pattern: '^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$'
+                observedGeneration:
+                  description: >
+                    ObservedGeneration is the most recent generation that
+                    the controller has processed.
+                  type: integer
+                  format: int64
