@@ -63,7 +63,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -86,6 +86,14 @@ type GuardRule struct {
 	// +optional
 	NameReferenceCheck *NameReferenceCheck `json:"nameReferenceCheck,omitempty"`
 
+	// ApprovalCheck verifies that the resource carries a valid approval
+	// annotation signed with the private key corresponding to the configured
+	// public key.  The annotation value must be the base64-encoded RSA
+	// signature of the resource's full path.
+	// Required when Type is ApprovalCheck.
+	// +optional
+	ApprovalCheck *ApprovalCheck `json:"approvalCheck,omitempty"`
+
 	// Message is the human-readable denial message returned to the user
 	// when this rule is violated.
 	Message string `json:"message"`
@@ -106,6 +114,11 @@ const (
 	// RuleTypeNameReferenceCheck denies the request when the subject resource
 	// is referenced by name in other cluster resources.
 	RuleTypeNameReferenceCheck RuleType = "NameReferenceCheck"
+
+	// RuleTypeApprovalCheck denies the request unless the resource carries
+	// a valid approval annotation whose value is the resource path signed
+	// with the private key corresponding to the configured public key.
+	RuleTypeApprovalCheck RuleType = "ApprovalCheck"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent
@@ -230,4 +243,28 @@ type ChangeValidatorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ChangeValidator `json:"items"`
+}
+
+// ApprovalCheck configures a rule that requires the resource to carry a valid
+// approval annotation before a change (typically a DELETE) is permitted.
+// The annotation value must be the base64-encoded RSA-PSS SHA-256 signature
+// of the resource's canonical path, signed with the private key that
+// corresponds to PublicKey.
+//
+// The canonical path is computed as:
+//
+//	<group>/<version>/namespaces/<namespace>/<resource>/<name>   (namespaced)
+//	<group>/<version>/<resource>/<name>                          (cluster-scoped)
+//
+// The annotation key defaults to "earlywatch.io/approved".
+type ApprovalCheck struct {
+	// PublicKey is the PEM-encoded RSA public key (PKIX/SubjectPublicKeyInfo
+	// format) used to verify the approval signature.
+	PublicKey string `json:"publicKey"`
+
+	// AnnotationKey is the annotation on the resource whose value holds the
+	// base64-encoded approval signature.
+	// Defaults to "earlywatch.io/approved".
+	// +optional
+	AnnotationKey string `json:"annotationKey,omitempty"`
 }

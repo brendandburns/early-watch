@@ -3,7 +3,13 @@ package webhook
 
 import (
 	"context"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"strings"
@@ -145,6 +151,12 @@ func (h *AdmissionHandler) evaluateRule(
 			return false, "", fmt.Errorf("rule %q has type NameReferenceCheck but no nameReferenceCheck config", rule.Name)
 		}
 		return h.evaluateNameReferenceCheck(ctx, *rule.NameReferenceCheck, rule.Message, req)
+
+	case ewv1alpha1.RuleTypeApprovalCheck:
+		if rule.ApprovalCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type ApprovalCheck but no approvalCheck config", rule.Name)
+		}
+		return evaluateApprovalCheck(*rule.ApprovalCheck, rule.Message, req)
 
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
@@ -380,4 +392,115 @@ func evalSimpleExpression(expr string, ctx map[string]interface{}) (bool, error)
 		return fmt.Sprintf("%v", actual) == val, nil
 	}
 	return false, fmt.Errorf("unsupported expression syntax: %q; only 'field == value' is supported", expr)
+}
+
+// defaultApprovalAnnotation is the annotation key used when ApprovalCheck.AnnotationKey is empty.
+const defaultApprovalAnnotation = "earlywatch.io/approved"
+
+// ResourcePath returns the canonical path string for a Kubernetes resource,
+// used as the message that must be signed for an approval annotation.
+//
+// Format:
+//
+//	<group>/<version>/namespaces/<namespace>/<resource>/<name>   (namespaced)
+//	<group>/<version>/<resource>/<name>                          (cluster-scoped)
+func ResourcePath(group, version, resource, namespace, name string) string {
+	if namespace != "" {
+		return fmt.Sprintf("%s/%s/namespaces/%s/%s/%s", group, version, namespace, resource, name)
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", group, version, resource, name)
+}
+
+// evaluateApprovalCheck verifies that the resource being acted on carries a
+// valid approval annotation.  The annotation value must be the base64-encoded
+// RSA-PSS SHA-256 signature of the resource's canonical path (as returned by
+// ResourcePath), signed with the private key corresponding to the public key
+// configured in the rule.
+//
+// The check is violated (returns true) when:
+//   - the annotation is absent, or
+//   - the annotation value is not a valid base64-encoded signature.
+func evaluateApprovalCheck(check ewv1alpha1.ApprovalCheck, message string, req admission.Request) (bool, string, error) {
+	// Parse the public key.
+	pubKey, err := parseRSAPublicKey(check.PublicKey)
+	if err != nil {
+		return false, "", fmt.Errorf("parsing public key: %w", err)
+	}
+
+	// Determine annotation key.
+	annotationKey := check.AnnotationKey
+	if annotationKey == "" {
+		annotationKey = defaultApprovalAnnotation
+	}
+
+	// For DELETE requests the object being deleted is in OldObject.
+	raw := req.Object.Raw
+	if len(raw) == 0 {
+		raw = req.OldObject.Raw
+	}
+
+	// Extract annotations from the raw object.
+	var meta struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return false, "", fmt.Errorf("unmarshalling object metadata: %w", err)
+	}
+
+	sigB64, ok := meta.Metadata.Annotations[annotationKey]
+	if !ok || sigB64 == "" {
+		if message == "" {
+			message = fmt.Sprintf("resource must carry a valid approval annotation %q before this operation is permitted", annotationKey)
+		}
+		return true, message, nil
+	}
+
+	// Decode the base64 signature.
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		if message == "" {
+			message = fmt.Sprintf("approval annotation %q contains an invalid base64 value", annotationKey)
+		}
+		return true, message, nil
+	}
+
+	// Compute the expected resource path.
+	path := ResourcePath(
+		req.Resource.Group,
+		req.Resource.Version,
+		req.Resource.Resource,
+		req.Namespace,
+		req.Name,
+	)
+
+	// Verify the RSA-PSS SHA-256 signature.
+	digest := sha256.Sum256([]byte(path))
+	if err := rsa.VerifyPSS(pubKey, crypto.SHA256, digest[:], sig, nil); err != nil {
+		if message == "" {
+			message = fmt.Sprintf("approval annotation %q contains an invalid signature for resource path %q", annotationKey, path)
+		}
+		return true, message, nil
+	}
+
+	return false, "", nil
+}
+
+// parseRSAPublicKey decodes a PEM-encoded RSA public key in PKIX
+// (SubjectPublicKeyInfo) format.
+func parseRSAPublicKey(pemData string) (*rsa.PublicKey, error) {
+	block, _ := pem.Decode([]byte(pemData))
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found in public key data")
+	}
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing PKIX public key: %w", err)
+	}
+	rsaPub, ok := pub.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("public key is not an RSA key")
+	}
+	return rsaPub, nil
 }
