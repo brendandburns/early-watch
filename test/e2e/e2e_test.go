@@ -50,7 +50,7 @@ var (
 	// k8sClient is a direct (non-caching) client used for all test setup and
 	// assertions.  A direct client is used so that list/get calls always
 	// reflect the latest etcd state without waiting for a cache sync; this is
-	// important for the cleanup helper, which must see deleted ChangeGuards
+	// important for the cleanup helper, which must see deleted ChangeValidators
 	// before attempting to delete guarded resources.
 	k8sClient client.Client
 	dynClient  dynamic.Interface
@@ -167,16 +167,16 @@ func createTestNamespace() {
 	}
 }
 
-// cleanupNamespace removes all ChangeGuards, ConfigMaps, Services, and Pods
-// from testNamespace.  It deletes ChangeGuards first and waits for them to
+// cleanupNamespace removes all ChangeValidators, ConfigMaps, Services, and Pods
+// from testNamespace.  It deletes ChangeValidators first and waits for them to
 // disappear from the API server so that subsequent deletes of guarded resources
 // are not blocked by the webhook.
 func cleanupNamespace(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 
-	// Delete all ChangeGuards.  The webhook allows this because no guard
-	// protects earlywatch.io/changeguards resources.
+	// Delete all ChangeValidators.  The webhook allows this because no guard
+	// protects earlywatch.io/changevalidators resources.
 	guardList := &ewv1alpha1.ChangeValidatorList{}
 	if err := k8sClient.List(ctx, guardList, client.InNamespace(testNamespace)); err == nil {
 		for i := range guardList.Items {
@@ -228,7 +228,7 @@ func cleanupNamespace(t *testing.T) {
 
 // --- resource helpers ---
 
-// makeChangeGuard creates a ChangeGuard in testNamespace.
+// makeChangeGuard creates a ChangeValidator in testNamespace.
 func makeChangeGuard(t *testing.T, guard *ewv1alpha1.ChangeValidator) {
 	t.Helper()
 	guard.Namespace = testNamespace
@@ -285,7 +285,7 @@ func boolPtr(b bool) *bool { return &b }
 
 // --- test cases ---
 
-// TestNoGuards_AllowsRequests verifies that when no ChangeGuards exist all
+// TestNoGuards_AllowsRequests verifies that when no ChangeValidators exist all
 // admission requests are allowed through.
 func TestNoGuards_AllowsRequests(t *testing.T) {
 	cleanupNamespace(t)
