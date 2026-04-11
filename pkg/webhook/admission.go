@@ -158,9 +158,33 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return evaluateApprovalCheck(*rule.ApprovalCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeCheckLock:
+		return evaluateCheckLock(rule.Message, req)
+
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
 	}
+}
+
+// renderMessage processes a message template by replacing mustache-style
+// {{variable}} placeholders with values from the admission request.
+//
+// Supported variables:
+//
+//	{{name}}      – the name of the resource being acted on
+//	{{namespace}} – the namespace of the resource (empty for cluster-scoped)
+//	{{resource}}  – the plural resource type, e.g. "services"
+//	{{operation}} – the admission operation, e.g. "DELETE"
+//	{{apiGroup}}  – the API group, e.g. "apps" (empty for core resources)
+func renderMessage(message string, req admission.Request) string {
+	r := strings.NewReplacer(
+		"{{name}}", req.Name,
+		"{{namespace}}", req.Namespace,
+		"{{resource}}", req.Resource.Resource,
+		"{{operation}}", string(req.Operation),
+		"{{apiGroup}}", req.Resource.Group,
+	)
+	return r.Replace(message)
 }
 
 // evaluateExistingResources queries the cluster for resources that depend on
@@ -228,7 +252,7 @@ func (h *AdmissionHandler) evaluateExistingResources(
 	}
 
 	if len(result.Items) > 0 {
-		return true, message, nil
+		return true, renderMessage(message, req), nil
 	}
 
 	return false, "", nil
@@ -267,7 +291,7 @@ func (h *AdmissionHandler) evaluateNameReferenceCheck(
 		for _, item := range result.Items {
 			for _, fieldPath := range res.NameFields {
 				if nameExistsAtPath(item.Object, strings.Split(fieldPath, "."), req.Name) {
-					return true, message, nil
+					return true, renderMessage(message, req), nil
 				}
 			}
 		}
@@ -350,6 +374,43 @@ func selectorFromField(raw []byte, fieldPath string) (labels.Selector, error) {
 	return labels.Everything(), nil
 }
 
+// evaluateCheckLock denies a DELETE request when the subject resource carries
+// the earlywatch.io/lock annotation.  For non-DELETE operations the check is
+// always a no-op (returns not-violated).
+func evaluateCheckLock(message string, req admission.Request) (bool, string, error) {
+	if req.Operation != admissionv1.Delete {
+		return false, "", nil
+	}
+
+	// For DELETE requests the object being deleted is in OldObject.
+	raw := req.OldObject.Raw
+	if len(raw) == 0 {
+		// Fall back to Object in case the webhook is configured to populate it.
+		raw = req.Object.Raw
+	}
+	if len(raw) == 0 {
+		return false, "", nil
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, "", fmt.Errorf("unmarshalling object for lock check: %w", err)
+	}
+
+	metadata, _ := obj["metadata"].(map[string]interface{})
+	if metadata == nil {
+		return false, "", nil
+	}
+	annotations, _ := metadata["annotations"].(map[string]interface{})
+	if annotations == nil {
+		return false, "", nil
+	}
+	if v, locked := annotations[ewv1alpha1.LockAnnotation]; locked && v != "" {
+		return true, message, nil
+	}
+	return false, "", nil
+}
+
 // evaluateExpression evaluates a CEL expression check against the admission
 // request.  This is a simplified implementation that currently only supports
 // checking the operation field.  A production implementation would use the
@@ -371,7 +432,7 @@ func evaluateExpression(check ewv1alpha1.ExpressionCheck, message string, req ad
 		return false, "", fmt.Errorf("evaluating expression %q: %w", expr, err)
 	}
 	if result {
-		return true, message, nil
+		return true, renderMessage(message, req), nil
 	}
 	return false, "", nil
 }

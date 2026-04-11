@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EarlyWatch — Kubernetes Change Safety</title>
+  <meta name="description" content="EarlyWatch is a Kubernetes admission controller that enforces change safety — preventing dangerous operations before they happen." />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
+
+  <style>
+    /* ─── Reset & base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0d1117;
+      --bg2:          #161b22;
+      --bg3:          #1c2230;
+      --border:       #30363d;
+      --text:         #e6edf3;
+      --text-muted:   #8b949e;
+      --accent:       #3b82f6;
+      --accent-glow:  rgba(59,130,246,.25);
+      --accent2:      #10b981;
+      --accent3:      #f59e0b;
+      --red:          #ef4444;
+      --radius:       12px;
+      --radius-sm:    6px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ─── Nav ───────────────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 60px;
+      background: rgba(13,17,23,.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .nav-logo svg { flex-shrink: 0; }
+
+    .nav-links {
+      display: flex;
+      gap: 1.8rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      font-size: .9rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      transition: color .2s;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .45rem 1rem;
+      border-radius: var(--radius-sm);
+      background: var(--accent);
+      color: #fff !important;
+      font-size: .85rem;
+      font-weight: 600;
+      transition: background .2s, box-shadow .2s;
+    }
+    .nav-cta:hover {
+      background: #2563eb;
+      text-decoration: none;
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+
+    /* ─── Hero ──────────────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 6rem 2rem 5rem;
+      text-align: center;
+    }
+
+    /* subtle grid background */
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: .2;
+      pointer-events: none;
+    }
+
+    /* radial glow */
+    .hero::after {
+      content: '';
+      position: absolute;
+      top: -20%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 700px;
+      height: 500px;
+      background: radial-gradient(ellipse at center, var(--accent-glow) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .3rem .8rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 1.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .badge-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 6px var(--accent2);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .4; }
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 6vw, 4rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -.03em;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero h1 span { color: var(--accent); }
+
+    .hero p {
+      max-width: 620px;
+      margin: 1.5rem auto 0;
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 2.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      padding: .75rem 1.6rem;
+      border-radius: var(--radius-sm);
+      font-size: .95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #2563eb;
+      box-shadow: 0 0 24px var(--accent-glow);
+      text-decoration: none;
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-outline:hover {
+      background: var(--bg2);
+      text-decoration: none;
+    }
+
+    /* ─── Flow diagram ──────────────────────────────────────────────── */
+    .flow-section {
+      padding: 5rem 2rem;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-label {
+      text-align: center;
+      font-size: .78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--accent);
+      margin-bottom: .75rem;
+    }
+
+    .section-title {
+      text-align: center;
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: .75rem;
+    }
+
+    .section-sub {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 1rem;
+      max-width: 540px;
+      margin: 0 auto 3rem;
+    }
+
+    .flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .flow-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: .6rem;
+      padding: 1.4rem 1.2rem;
+      min-width: 130px;
+      max-width: 160px;
+      text-align: center;
+    }
+
+    .flow-icon {
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      border: 2px solid var(--border);
+      background: var(--bg3);
+    }
+
+    .flow-icon.blue  { border-color: var(--accent);  background: rgba(59,130,246,.12); }
+    .flow-icon.green { border-color: var(--accent2); background: rgba(16,185,129,.12); }
+    .flow-icon.red   { border-color: var(--red);     background: rgba(239,68,68,.12);  }
+    .flow-icon.amber { border-color: var(--accent3); background: rgba(245,158,11,.12); }
+
+    .flow-step-label {
+      font-size: .8rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .flow-step-sub {
+      font-size: .72rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .flow-arrow {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      padding: 0 .2rem;
+    }
+
+    .flow-verdict {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .35rem .9rem;
+      border-radius: 999px;
+      font-size: .8rem;
+      font-weight: 700;
+      margin-top: .4rem;
+    }
+
+    .verdict-deny {
+      background: rgba(239,68,68,.15);
+      border: 1px solid rgba(239,68,68,.4);
+      color: #f87171;
+    }
+
+    .verdict-allow {
+      background: rgba(16,185,129,.15);
+      border: 1px solid rgba(16,185,129,.4);
+      color: #34d399;
+    }
+
+    /* ─── Features ──────────────────────────────────────────────────── */
+    .features-section {
+      padding: 5rem 2rem;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .feature-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.6rem;
+      transition: border-color .2s, box-shadow .2s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .feature-icon {
+      font-size: 1.8rem;
+      margin-bottom: .8rem;
+    }
+
+    .feature-title {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: .4rem;
+    }
+
+    .feature-desc {
+      font-size: .88rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* ─── CRD anatomy ───────────────────────────────────────────────── */
+    .crd-section {
+      padding: 5rem 2rem;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .crd-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      max-width: 1000px;
+      margin: 0 auto;
+      align-items: start;
+    }
+
+    @media (max-width: 720px) {
+      .crd-layout { grid-template-columns: 1fr; }
+    }
+
+    .crd-info h3 {
+      font-size: 1.5rem;
+      font-weight: 800;
+      margin-bottom: .75rem;
+    }
+
+    .crd-info p {
+      color: var(--text-muted);
+      font-size: .95rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .rule-type {
+      display: flex;
+      gap: .8rem;
+      padding: .9rem 1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg3);
+      margin-bottom: .75rem;
+    }
+
+    .rule-type-badge {
+      flex-shrink: 0;
+      padding: .15rem .55rem;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .75rem;
+      font-weight: 600;
+      background: rgba(59,130,246,.2);
+      color: #93c5fd;
+      align-self: flex-start;
+      margin-top: .15rem;
+    }
+
+    .rule-type-desc {
+      font-size: .85rem;
+      color: var(--text-muted);
+    }
+
+    .rule-type-desc strong { color: var(--text); }
+
+    pre {
+      border-radius: var(--radius);
+      overflow: hidden;
+      font-size: .82rem;
+    }
+
+    pre code.hljs { padding: 1.4rem !important; }
+
+    /* ─── Getting started ───────────────────────────────────────────── */
+    .gettingstarted-section {
+      padding: 5rem 2rem;
+    }
+
+    .steps {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      max-width: 680px;
+      margin: 0 auto;
+      counter-reset: step;
+    }
+
+    .step {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.2rem 1.4rem;
+    }
+
+    .step-num {
+      counter-increment: step;
+      flex-shrink: 0;
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      font-size: .85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .step-body h4 {
+      font-size: .95rem;
+      font-weight: 700;
+      margin-bottom: .3rem;
+    }
+
+    .step-body p {
+      font-size: .85rem;
+      color: var(--text-muted);
+    }
+
+    .code-inline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .82rem;
+      padding: .15rem .4rem;
+      border-radius: 4px;
+      background: rgba(59,130,246,.15);
+      color: #93c5fd;
+    }
+
+    /* ─── Footer ────────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2.5rem 2rem;
+      text-align: center;
+      font-size: .85rem;
+      color: var(--text-muted);
+    }
+
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+
+    /* ─── Responsive nav ────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .nav-links { display: none; }
+    }
+
+    /* ─── Scrollbar ─────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ─── Nav ─────────────────────────────────────────────────────────── -->
+<nav>
+  <a class="nav-logo" href="#">
+    <!-- shield icon -->
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>
+    EarlyWatch
+  </a>
+  <ul class="nav-links">
+    <li><a href="#how-it-works">How It Works</a></li>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#crd">CRD</a></li>
+    <li><a href="#getting-started">Getting Started</a></li>
+  </ul>
+  <a class="nav-cta" href="https://github.com/brendandburns/early-watch" target="_blank" rel="noopener">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+    </svg>
+    GitHub
+  </a>
+</nav>
+
+<!-- ─── Hero ─────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="badge-dot"></span>
+    Kubernetes Admission Controller
+  </div>
+  <h1>Stop dangerous changes<br /><span>before they happen</span></h1>
+  <p>
+    EarlyWatch enforces <strong>change safety</strong> in your Kubernetes cluster —
+    preventing operations that would break dependent resources, before the damage is done.
+  </p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#getting-started">
+      Get Started
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+      </svg>
+    </a>
+    <a class="btn btn-outline" href="https://github.com/brendandburns/early-watch" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+      </svg>
+      View on GitHub
+    </a>
+  </div>
+</section>
+
+<!-- ─── How It Works ──────────────────────────────────────────────────── -->
+<section class="flow-section" id="how-it-works">
+  <p class="section-label">How It Works</p>
+  <h2 class="section-title">Every change goes through a safety check</h2>
+  <p class="section-sub">
+    EarlyWatch intercepts admission requests via a Kubernetes ValidatingWebhookConfiguration
+    and evaluates your <code class="code-inline">ChangeValidator</code> rules before any mutation reaches the cluster.
+  </p>
+
+  <div class="flow">
+    <div class="flow-step">
+      <div class="flow-icon blue">🧑‍💻</div>
+      <div class="flow-step-label">User / CI</div>
+      <div class="flow-step-sub"><code class="code-inline" style="font-size:.7rem">kubectl delete svc</code></div>
+    </div>
+
+    <div class="flow-arrow">→</div>
+
+    <div class="flow-step">
+      <div class="flow-icon blue">⚙️</div>
+      <div class="flow-step-label">API Server</div>
+      <div class="flow-step-sub">Receives request, calls webhook</div>
+    </div>
+
+    <div class="flow-arrow">→</div>
+
+    <div class="flow-step">
+      <div class="flow-icon amber">🛡️</div>
+      <div class="flow-step-label">EarlyWatch</div>
+      <div class="flow-step-sub">Loads <code class="code-inline" style="font-size:.7rem">ChangeValidator</code> rules</div>
+    </div>
+
+    <div class="flow-arrow">→</div>
+
+    <div class="flow-step">
+      <div class="flow-icon green">🔍</div>
+      <div class="flow-step-label">Rule Eval</div>
+      <div class="flow-step-sub">Queries cluster for dependent resources</div>
+    </div>
+
+    <div class="flow-arrow">→</div>
+
+    <div class="flow-step">
+      <div class="flow-icon red">🚫</div>
+      <div class="flow-step-label">Verdict</div>
+      <div class="flow-step-sub">
+        <span class="flow-verdict verdict-deny">DENY</span>
+        <span class="flow-verdict verdict-allow">ALLOW</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Features ─────────────────────────────────────────────────────── -->
+<section class="features-section" id="features">
+  <p class="section-label">Features</p>
+  <h2 class="section-title">Built for production Kubernetes</h2>
+  <p class="section-sub">Lightweight, declarative, and easy to extend.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📋</div>
+      <div class="feature-title">Declarative rules</div>
+      <div class="feature-desc">
+        Define safety policies as <code class="code-inline">ChangeValidator</code> CRs in YAML — no code required.
+        Version-control your policies alongside your application manifests.
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🔗</div>
+      <div class="feature-title">Dependency awareness</div>
+      <div class="feature-desc">
+        The <code class="code-inline">ExistingResources</code> rule type checks for live dependent resources
+        (e.g. Pods matching a Service's label selector) before allowing a destructive operation.
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🧩</div>
+      <div class="feature-title">Expression checks</div>
+      <div class="feature-desc">
+        The <code class="code-inline">ExpressionCheck</code> rule type lets you write simple expressions
+        evaluated against the admission request for custom policy logic.
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🎯</div>
+      <div class="feature-title">Operation targeting</div>
+      <div class="feature-desc">
+        Scope each <code class="code-inline">ChangeValidator</code> to specific operations — <code class="code-inline">DELETE</code>,
+        <code class="code-inline">UPDATE</code>, <code class="code-inline">CREATE</code> — and specific resource types.
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">💬</div>
+      <div class="feature-title">Human-readable errors</div>
+      <div class="feature-desc">
+        Every denial surfaces a clear, operator-defined <code class="code-inline">message</code> field
+        so developers instantly know why their operation was blocked.
+      </div>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <div class="feature-title">Minimal footprint</div>
+      <div class="feature-desc">
+        A single Go binary with no external dependencies beyond the Kubernetes API.
+        Runs as a standard Deployment with least-privilege RBAC.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── CRD Anatomy ───────────────────────────────────────────────────── -->
+<section class="crd-section" id="crd">
+  <p class="section-label">Custom Resource</p>
+  <h2 class="section-title">ChangeValidator</h2>
+  <p class="section-sub">
+    One CRD. Infinitely composable safety rules.
+  </p>
+
+  <div class="crd-layout">
+    <div class="crd-info">
+      <h3>Rule types</h3>
+      <p>Each <code class="code-inline">ChangeValidator</code> can contain one or more rules.
+         All rules are evaluated; the first violation denies the request.</p>
+
+      <div class="rule-type">
+        <span class="rule-type-badge">ExistingResources</span>
+        <div class="rule-type-desc">
+          <strong>Dependency guard.</strong> Denies the request when dependent resources still exist
+          — e.g., block Service deletion while matching Pods are running.
+        </div>
+      </div>
+
+      <div class="rule-type">
+        <span class="rule-type-badge">ExpressionCheck</span>
+        <div class="rule-type-desc">
+          <strong>Expression guard.</strong> Evaluates a simple expression against the admission
+          request object for custom policy logic.
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <pre><code class="language-yaml">apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: protect-service-from-deletion
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""        # core API group
+    resource: services
+
+  operations:
+    - DELETE
+
+  rules:
+    - name: no-matching-pods
+      type: ExistingResources
+      existingResources:
+        apiGroup: ""
+        resource: pods
+        # Use the Service's spec.selector to find Pods
+        labelSelectorFromField: spec.selector
+        sameNamespace: true
+      message: >
+        This Service cannot be deleted because
+        matching Pods are still running.</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Getting Started ──────────────────────────────────────────────── -->
+<section class="gettingstarted-section" id="getting-started">
+  <p class="section-label">Getting Started</p>
+  <h2 class="section-title">Up and running in minutes</h2>
+  <p class="section-sub">
+    EarlyWatch requires a Kubernetes cluster (v1.26+), <code class="code-inline">kubectl</code>,
+    and <a href="https://cert-manager.io/" target="_blank" rel="noopener">cert-manager</a> for TLS.
+  </p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Install the CRD</h4>
+        <p>Register the <code class="code-inline">ChangeValidator</code> custom resource definition in your cluster.</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">kubectl apply -f config/crd/bases/earlywatch.io_changevalidators.yaml</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Create namespace &amp; RBAC</h4>
+        <p>Set up the dedicated namespace and the least-privilege service account.</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">kubectl create namespace early-watch-system
+kubectl apply -f config/rbac/</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Deploy the webhook server</h4>
+        <p>Deploy the EarlyWatch admission webhook (TLS certificates must be available via cert-manager).</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">kubectl apply -f config/webhook/</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h4>Apply a ChangeValidator</h4>
+        <p>Deploy the sample policy that prevents Service deletion while matching Pods are running.</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">kubectl apply -f config/samples/protect_service.yaml</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h4>Test it!</h4>
+        <p>Try deleting a Service while its matching Pods are running. EarlyWatch will deny the request with a clear error.</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">kubectl delete service my-svc
+# Error from server: "This Service cannot be deleted because
+# matching Pods are still running."</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Footer ───────────────────────────────────────────────────────── -->
+<footer>
+  <p>
+    EarlyWatch is open source under the
+    <a href="https://github.com/brendandburns/early-watch/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0 License</a>.
+    Built with ❤️ for the Kubernetes community.
+    &nbsp;·&nbsp;
+    <a href="https://github.com/brendandburns/early-watch" target="_blank" rel="noopener">GitHub</a>
+  </p>
+</footer>
+
+<!-- Syntax highlighting -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>hljs.highlightAll();</script>
+
+</body>
+</html>

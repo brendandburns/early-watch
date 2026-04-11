@@ -61,6 +61,7 @@ spec:
               - spec.jobTemplate.spec.template.spec.containers.env.valueFrom.configMapKeyRef.name
               - spec.jobTemplate.spec.template.spec.initContainers.env.valueFrom.configMapKeyRef.name
       message: >
-        This ConfigMap cannot be deleted because it is still referenced by one
-        or more Deployments, DaemonSets, or CronJobs. Remove all references to
-        the ConfigMap from those workloads before deleting it.
+        ConfigMap "{{name}}" in namespace "{{namespace}}" cannot be deleted
+        because it is still referenced by one or more Deployments, DaemonSets,
+        or CronJobs. Remove all references to the ConfigMap from those
+        workloads before deleting it.

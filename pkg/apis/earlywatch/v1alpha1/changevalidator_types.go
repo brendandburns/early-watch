@@ -63,7 +63,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck;CheckLock
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -99,6 +99,11 @@ type GuardRule struct {
 	Message string `json:"message"`
 }
 
+// LockAnnotation is the annotation key that, when present on a resource,
+// prevents it from being deleted.  Any non-empty annotation value is treated
+// as a lock.
+const LockAnnotation = "earlywatch.io/lock"
+
 // RuleType identifies the kind of safety check a GuardRule performs.
 type RuleType string
 
@@ -119,6 +124,10 @@ const (
 	// a valid approval annotation whose value is the resource path signed
 	// with the private key corresponding to the configured public key.
 	RuleTypeApprovalCheck RuleType = "ApprovalCheck"
+
+	// RuleTypeCheckLock denies a DELETE request when the subject resource
+	// carries the earlywatch.io/lock annotation.
+	RuleTypeCheckLock RuleType = "CheckLock"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent
