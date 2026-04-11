@@ -63,7 +63,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;AnnotationCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -86,9 +86,32 @@ type GuardRule struct {
 	// +optional
 	NameReferenceCheck *NameReferenceCheck `json:"nameReferenceCheck,omitempty"`
 
+	// AnnotationCheck denies the request when the subject resource does not
+	// carry a required annotation (with an optional specific value).  Use
+	// this to implement a "confirm delete" pattern.
+	// Required when Type is AnnotationCheck.
+	// +optional
+	AnnotationCheck *AnnotationCheck `json:"annotationCheck,omitempty"`
+
 	// Message is the human-readable denial message returned to the user
 	// when this rule is violated.
 	Message string `json:"message"`
+}
+
+// AnnotationCheck denies the request unless the subject resource has a
+// specific annotation (and optionally a specific value for that annotation).
+// For DELETE requests the annotation is read from the object being deleted
+// (OldObject in the admission request).
+type AnnotationCheck struct {
+	// AnnotationKey is the annotation key that must be present on the
+	// resource.  For example: "earlywatch.io/confirm-delete".
+	AnnotationKey string `json:"annotationKey"`
+
+	// AnnotationValue, if specified, is the exact value that the annotation
+	// must have.  When omitted, any value (including the empty string) is
+	// accepted as long as the key is present.
+	// +optional
+	AnnotationValue *string `json:"annotationValue,omitempty"`
 }
 
 // RuleType identifies the kind of safety check a GuardRule performs.
@@ -106,6 +129,12 @@ const (
 	// RuleTypeNameReferenceCheck denies the request when the subject resource
 	// is referenced by name in other cluster resources.
 	RuleTypeNameReferenceCheck RuleType = "NameReferenceCheck"
+
+	// RuleTypeAnnotationCheck denies the request when the subject resource
+	// does not have a required annotation (with an optional specific value).
+	// Use this to implement a "confirm delete" pattern where a resource can
+	// only be deleted after the operator adds a designated annotation.
+	RuleTypeAnnotationCheck RuleType = "AnnotationCheck"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent

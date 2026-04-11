@@ -146,6 +146,12 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return h.evaluateNameReferenceCheck(ctx, *rule.NameReferenceCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeAnnotationCheck:
+		if rule.AnnotationCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type AnnotationCheck but no annotationCheck config", rule.Name)
+		}
+		return evaluateAnnotationCheck(*rule.AnnotationCheck, rule.Message, req)
+
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
 	}
@@ -380,4 +386,45 @@ func evalSimpleExpression(expr string, ctx map[string]interface{}) (bool, error)
 		return fmt.Sprintf("%v", actual) == val, nil
 	}
 	return false, fmt.Errorf("unsupported expression syntax: %q; only 'field == value' is supported", expr)
+}
+
+// evaluateAnnotationCheck denies the admission request unless the subject
+// resource carries the required annotation (and, when AnnotationValue is set,
+// the annotation has exactly that value).
+//
+// For DELETE requests the object being deleted is available in OldObject
+// rather than Object, so both are inspected.
+func evaluateAnnotationCheck(check ewv1alpha1.AnnotationCheck, message string, req admission.Request) (bool, string, error) {
+	// Prefer Object; fall back to OldObject for DELETE requests.
+	raw := req.Object.Raw
+	if len(raw) == 0 {
+		raw = req.OldObject.Raw
+	}
+	if len(raw) == 0 {
+		// No object data available – treat as annotation absent.
+		return true, message, nil
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, "", fmt.Errorf("unmarshalling object for annotation check: %w", err)
+	}
+
+	// Navigate metadata.annotations.
+	metadata, _ := obj["metadata"].(map[string]interface{})
+	annotations, _ := metadata["annotations"].(map[string]interface{})
+
+	val, present := annotations[check.AnnotationKey]
+	if !present {
+		return true, message, nil
+	}
+
+	if check.AnnotationValue != nil {
+		valStr, _ := val.(string)
+		if valStr != *check.AnnotationValue {
+			return true, message, nil
+		}
+	}
+
+	return false, "", nil
 }
