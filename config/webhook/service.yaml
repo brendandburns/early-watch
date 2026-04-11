@@ -1,0 +1,19 @@
+---
+# Service exposes the admission webhook server to the API server.
+apiVersion: v1
+kind: Service
+metadata:
+  name: early-watch-webhook-service
+  namespace: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+spec:
+  selector:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+  ports:
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 9443

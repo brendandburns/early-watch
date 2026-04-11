@@ -1,0 +1,58 @@
+---
+# ClusterRole grants the webhook server the permissions it needs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: early-watch-role
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+rules:
+  # Read ChangeGuard custom resources to evaluate rules.
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - changeguards
+    verbs:
+      - get
+      - list
+      - watch
+  # Update ChangeGuard status subresource.
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - changeguards/status
+    verbs:
+      - get
+      - patch
+      - update
+  # Read any resource so the ExistingResources check can query the cluster.
+  - apiGroups:
+      - "*"
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+  # Allow leader election.
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  # Allow recording events.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
