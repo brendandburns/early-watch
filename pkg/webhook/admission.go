@@ -146,6 +146,9 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return h.evaluateNameReferenceCheck(ctx, *rule.NameReferenceCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeCheckLock:
+		return evaluateCheckLock(rule.Message, req)
+
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
 	}
@@ -357,6 +360,43 @@ func selectorFromField(raw []byte, fieldPath string) (labels.Selector, error) {
 	}
 
 	return labels.Everything(), nil
+}
+
+// evaluateCheckLock denies a DELETE request when the subject resource carries
+// the earlywatch.io/lock annotation.  For non-DELETE operations the check is
+// always a no-op (returns not-violated).
+func evaluateCheckLock(message string, req admission.Request) (bool, string, error) {
+	if req.Operation != admissionv1.Delete {
+		return false, "", nil
+	}
+
+	// For DELETE requests the object being deleted is in OldObject.
+	raw := req.OldObject.Raw
+	if len(raw) == 0 {
+		// Fall back to Object in case the webhook is configured to populate it.
+		raw = req.Object.Raw
+	}
+	if len(raw) == 0 {
+		return false, "", nil
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, "", fmt.Errorf("unmarshalling object for lock check: %w", err)
+	}
+
+	metadata, _ := obj["metadata"].(map[string]interface{})
+	if metadata == nil {
+		return false, "", nil
+	}
+	annotations, _ := metadata["annotations"].(map[string]interface{})
+	if annotations == nil {
+		return false, "", nil
+	}
+	if v, locked := annotations[ewv1alpha1.LockAnnotation]; locked && v != "" {
+		return true, message, nil
+	}
+	return false, "", nil
 }
 
 // evaluateExpression evaluates a CEL expression check against the admission
