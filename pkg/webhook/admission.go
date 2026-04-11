@@ -100,6 +100,17 @@ func appliesToRequest(guard *ewv1alpha1.ChangeValidator, req admission.Request) 
 		return false
 	}
 
+	// Match specific resource names if the guard is scoped to a list of names.
+	if len(subj.Names) > 0 {
+		nameSet := make(map[string]struct{}, len(subj.Names))
+		for _, n := range subj.Names {
+			nameSet[n] = struct{}{}
+		}
+		if _, ok := nameSet[req.Name]; !ok {
+			return false
+		}
+	}
+
 	// Match operation.
 	for _, op := range guard.Spec.Operations {
 		if admissionv1.Operation(op) == req.Operation {
@@ -172,6 +183,13 @@ func (h *AdmissionHandler) evaluateExistingResources(
 	namespace := ""
 	if check.SameNamespace == nil || *check.SameNamespace {
 		namespace = req.Namespace
+		// For cluster-scoped resources such as Namespace objects, req.Namespace
+		// is empty but req.Name holds the name of the resource being acted on
+		// (e.g. the namespace being deleted).  When the subject resource IS a
+		// namespace, use req.Name so that we search inside that namespace.
+		if namespace == "" && strings.EqualFold(req.Resource.Resource, "namespaces") {
+			namespace = req.Name
+		}
 	}
 
 	// Build GVR for the dependent resource.

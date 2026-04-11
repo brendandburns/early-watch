@@ -32,6 +32,13 @@ type SubjectResource struct {
 	// Resource is the plural resource name, e.g. "services", "deployments".
 	Resource string `json:"resource"`
 
+	// Names optionally restricts this guard to only resources whose name is
+	// in the list.  When omitted (or empty) the guard applies to all
+	// resources of the given type.  For namespace-deletion guards this lets
+	// you protect a specific set of namespaces rather than every namespace.
+	// +optional
+	Names []string `json:"names,omitempty"`
+
 	// NamespaceSelector optionally restricts this guard to namespaces that
 	// match the given label selector.  When omitted the guard applies to
 	// all namespaces.

@@ -1,0 +1,60 @@
+---
+# Example 1 – protect ALL namespaces from deletion while they still contain
+# Pods.  Apply this cluster-wide (no namespace on the object) so that the
+# webhook intercepts every Namespace DELETE request regardless of which
+# namespace is targeted.
+#
+# Once applied, any DELETE on a Namespace is denied if Pods still exist inside
+# that namespace.
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: protect-all-namespaces-from-deletion
+  # No namespace – this is a cluster-scoped guard.
+spec:
+  subject:
+    apiGroup: ""      # core API group
+    resource: namespaces
+    # names is omitted, so the guard applies to ALL namespaces.
+  operations:
+    - DELETE
+  rules:
+    - name: namespace-must-be-empty
+      type: ExistingResources
+      existingResources:
+        apiGroup: ""  # core API group
+        resource: pods
+        # sameNamespace defaults to true; for Namespace deletion the webhook
+        # automatically uses the name of the namespace being deleted as the
+        # scope so that it searches for Pods inside that namespace.
+      message: >
+        This Namespace cannot be deleted because it still contains Pods.
+        Delete or evict all Pods before removing the Namespace.
+
+---
+# Example 2 – protect only a specific list of namespaces (e.g. "production"
+# and "staging") from non-empty deletion.  Deleting other namespaces is not
+# affected by this guard.
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: protect-production-namespaces-from-deletion
+  # No namespace – this is a cluster-scoped guard.
+spec:
+  subject:
+    apiGroup: ""      # core API group
+    resource: namespaces
+    names:
+      - production
+      - staging
+  operations:
+    - DELETE
+  rules:
+    - name: namespace-must-be-empty
+      type: ExistingResources
+      existingResources:
+        apiGroup: ""  # core API group
+        resource: pods
+      message: >
+        This Namespace cannot be deleted because it still contains Pods.
+        Delete or evict all Pods before removing the Namespace.
