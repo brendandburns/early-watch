@@ -36,6 +36,7 @@ spec:
               - spec.defaultBackend.service.name
               - spec.rules.http.paths.backend.service.name
       message: >
-        This Service cannot be deleted because it is still referenced as a
-        backend by one or more Ingress resources. Update or remove all Ingress
-        backend references to this Service before deleting it.
+        Service "{{name}}" in namespace "{{namespace}}" cannot be deleted
+        because it is still referenced as a backend by one or more Ingress
+        resources. Update or remove all Ingress backend references to this
+        Service before deleting it.

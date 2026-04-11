@@ -31,6 +31,6 @@ spec:
         labelSelectorFromField: spec.selector
         sameNamespace: true
       message: >
-        This Service cannot be deleted because Pods that match its label
-        selector are still running. Scale down or delete the matching Pods
-        before removing the Service.
+        Service "{{name}}" in namespace "{{namespace}}" cannot be deleted
+        because Pods that match its label selector are still running.
+        Scale down or delete the matching Pods before removing the Service.

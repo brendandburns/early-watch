@@ -151,6 +151,27 @@ func (h *AdmissionHandler) evaluateRule(
 	}
 }
 
+// renderMessage processes a message template by replacing mustache-style
+// {{variable}} placeholders with values from the admission request.
+//
+// Supported variables:
+//
+//	{{name}}      – the name of the resource being acted on
+//	{{namespace}} – the namespace of the resource (empty for cluster-scoped)
+//	{{resource}}  – the plural resource type, e.g. "services"
+//	{{operation}} – the admission operation, e.g. "DELETE"
+//	{{apiGroup}}  – the API group, e.g. "apps" (empty for core resources)
+func renderMessage(message string, req admission.Request) string {
+	r := strings.NewReplacer(
+		"{{name}}", req.Name,
+		"{{namespace}}", req.Namespace,
+		"{{resource}}", req.Resource.Resource,
+		"{{operation}}", string(req.Operation),
+		"{{apiGroup}}", req.Resource.Group,
+	)
+	return r.Replace(message)
+}
+
 // evaluateExistingResources queries the cluster for resources that depend on
 // the subject and returns true (violated) when any are found.
 func (h *AdmissionHandler) evaluateExistingResources(
@@ -216,7 +237,7 @@ func (h *AdmissionHandler) evaluateExistingResources(
 	}
 
 	if len(result.Items) > 0 {
-		return true, message, nil
+		return true, renderMessage(message, req), nil
 	}
 
 	return false, "", nil
@@ -255,7 +276,7 @@ func (h *AdmissionHandler) evaluateNameReferenceCheck(
 		for _, item := range result.Items {
 			for _, fieldPath := range res.NameFields {
 				if nameExistsAtPath(item.Object, strings.Split(fieldPath, "."), req.Name) {
-					return true, message, nil
+					return true, renderMessage(message, req), nil
 				}
 			}
 		}
@@ -359,7 +380,7 @@ func evaluateExpression(check ewv1alpha1.ExpressionCheck, message string, req ad
 		return false, "", fmt.Errorf("evaluating expression %q: %w", expr, err)
 	}
 	if result {
-		return true, message, nil
+		return true, renderMessage(message, req), nil
 	}
 	return false, "", nil
 }
