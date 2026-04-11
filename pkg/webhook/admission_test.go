@@ -43,8 +43,8 @@ func makeRequest(operation admissionv1.Operation, group, resource, namespace, na
 // --- appliesToRequest tests ---
 
 func TestAppliesToRequest_Match(t *testing.T) {
-	guard := &ewv1alpha1.ChangeGuard{
-		Spec: ewv1alpha1.ChangeGuardSpec{
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject: ewv1alpha1.SubjectResource{
 				APIGroup: "",
 				Resource: "services",
@@ -59,8 +59,8 @@ func TestAppliesToRequest_Match(t *testing.T) {
 }
 
 func TestAppliesToRequest_WrongResource(t *testing.T) {
-	guard := &ewv1alpha1.ChangeGuard{
-		Spec: ewv1alpha1.ChangeGuardSpec{
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject: ewv1alpha1.SubjectResource{
 				APIGroup: "",
 				Resource: "services",
@@ -75,8 +75,8 @@ func TestAppliesToRequest_WrongResource(t *testing.T) {
 }
 
 func TestAppliesToRequest_WrongOperation(t *testing.T) {
-	guard := &ewv1alpha1.ChangeGuard{
-		Spec: ewv1alpha1.ChangeGuardSpec{
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject: ewv1alpha1.SubjectResource{
 				APIGroup: "",
 				Resource: "services",
@@ -91,8 +91,8 @@ func TestAppliesToRequest_WrongOperation(t *testing.T) {
 }
 
 func TestAppliesToRequest_WrongAPIGroup(t *testing.T) {
-	guard := &ewv1alpha1.ChangeGuard{
-		Spec: ewv1alpha1.ChangeGuardSpec{
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject: ewv1alpha1.SubjectResource{
 				APIGroup: "apps",
 				Resource: "deployments",
@@ -377,9 +377,9 @@ func TestHandle_NoGuards(t *testing.T) {
 
 func TestHandle_ExpressionCheckDenied(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	guard := &ewv1alpha1.ChangeGuard{
+	guard := &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "guard1", Namespace: "default"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{
@@ -412,9 +412,9 @@ func TestHandle_ExpressionCheckDenied(t *testing.T) {
 
 func TestHandle_ExpressionCheckAllowed(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	guard := &ewv1alpha1.ChangeGuard{
+	guard := &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "guard1", Namespace: "default"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{
@@ -454,9 +454,9 @@ func TestHandle_ExistingResourcesDenied(t *testing.T) {
 			Namespace: "default",
 		},
 	}
-	guard := &ewv1alpha1.ChangeGuard{
+	guard := &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "guard1", Namespace: "default"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{
@@ -490,9 +490,9 @@ func TestHandle_ExistingResourcesDenied(t *testing.T) {
 
 func TestHandle_ExistingResourcesAllowed(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	guard := &ewv1alpha1.ChangeGuard{
+	guard := &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "guard1", Namespace: "default"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{

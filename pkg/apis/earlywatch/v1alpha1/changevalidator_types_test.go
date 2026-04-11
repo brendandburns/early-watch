@@ -6,25 +6,25 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func TestChangeGuard_DeepCopy_NilSafe(t *testing.T) {
-	var cg *ChangeGuard
+func TestChangeValidator_DeepCopy_NilSafe(t *testing.T) {
+	var cg *ChangeValidator
 	if got := cg.DeepCopy(); got != nil {
-		t.Error("DeepCopy of nil ChangeGuard should return nil")
+		t.Error("DeepCopy of nil ChangeValidator should return nil")
 	}
 
-	var cl *ChangeGuardList
+	var cl *ChangeValidatorList
 	if got := cl.DeepCopy(); got != nil {
-		t.Error("DeepCopy of nil ChangeGuardList should return nil")
+		t.Error("DeepCopy of nil ChangeValidatorList should return nil")
 	}
 
-	var spec *ChangeGuardSpec
+	var spec *ChangeValidatorSpec
 	if got := spec.DeepCopy(); got != nil {
-		t.Error("DeepCopy of nil ChangeGuardSpec should return nil")
+		t.Error("DeepCopy of nil ChangeValidatorSpec should return nil")
 	}
 
-	var status *ChangeGuardStatus
+	var status *ChangeValidatorStatus
 	if got := status.DeepCopy(); got != nil {
-		t.Error("DeepCopy of nil ChangeGuardStatus should return nil")
+		t.Error("DeepCopy of nil ChangeValidatorStatus should return nil")
 	}
 
 	var rule *GuardRule
@@ -48,10 +48,10 @@ func TestChangeGuard_DeepCopy_NilSafe(t *testing.T) {
 	}
 }
 
-func TestChangeGuard_DeepCopy(t *testing.T) {
-	original := &ChangeGuard{
+func TestChangeValidator_DeepCopy(t *testing.T) {
+	original := &ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-guard", Namespace: "default"},
-		Spec: ChangeGuardSpec{
+		Spec: ChangeValidatorSpec{
 			Subject: SubjectResource{
 				APIGroup: "apps",
 				Resource: "deployments",
@@ -88,10 +88,10 @@ func TestChangeGuard_DeepCopy(t *testing.T) {
 	}
 }
 
-func TestChangeGuard_DeepCopyObject(t *testing.T) {
-	original := &ChangeGuard{
+func TestChangeValidator_DeepCopyObject(t *testing.T) {
+	original := &ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-guard"},
-		Spec: ChangeGuardSpec{
+		Spec: ChangeValidatorSpec{
 			Subject:    SubjectResource{Resource: "services"},
 			Operations: []OperationType{OperationDelete},
 			Rules:      []GuardRule{{Name: "r1", Type: RuleTypeExpressionCheck, Message: "m"}},
@@ -102,9 +102,9 @@ func TestChangeGuard_DeepCopyObject(t *testing.T) {
 	if obj == nil {
 		t.Fatal("DeepCopyObject returned nil")
 	}
-	copied, ok := obj.(*ChangeGuard)
+	copied, ok := obj.(*ChangeValidator)
 	if !ok {
-		t.Fatalf("DeepCopyObject returned %T, want *ChangeGuard", obj)
+		t.Fatalf("DeepCopyObject returned %T, want *ChangeValidator", obj)
 	}
 	copied.Spec.Subject.Resource = "pods"
 	if original.Spec.Subject.Resource != "services" {
@@ -112,12 +112,12 @@ func TestChangeGuard_DeepCopyObject(t *testing.T) {
 	}
 }
 
-func TestChangeGuardList_DeepCopy(t *testing.T) {
-	original := &ChangeGuardList{
-		Items: []ChangeGuard{
+func TestChangeValidatorList_DeepCopy(t *testing.T) {
+	original := &ChangeValidatorList{
+		Items: []ChangeValidator{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "g1"},
-				Spec: ChangeGuardSpec{
+				Spec: ChangeValidatorSpec{
 					Subject:    SubjectResource{Resource: "services"},
 					Operations: []OperationType{OperationDelete},
 					Rules:      []GuardRule{{Name: "r1", Type: RuleTypeExpressionCheck, Message: "m"}},
@@ -130,13 +130,13 @@ func TestChangeGuardList_DeepCopy(t *testing.T) {
 	copied.Items[0].Spec.Subject.Resource = "pods"
 
 	if original.Items[0].Spec.Subject.Resource != "services" {
-		t.Error("ChangeGuardList.DeepCopy shared Items data with original")
+		t.Error("ChangeValidatorList.DeepCopy shared Items data with original")
 	}
 }
 
-func TestChangeGuardList_DeepCopyObject(t *testing.T) {
-	original := &ChangeGuardList{
-		Items: []ChangeGuard{
+func TestChangeValidatorList_DeepCopyObject(t *testing.T) {
+	original := &ChangeValidatorList{
+		Items: []ChangeValidator{
 			{ObjectMeta: metav1.ObjectMeta{Name: "g1"}},
 		},
 	}
@@ -145,8 +145,8 @@ func TestChangeGuardList_DeepCopyObject(t *testing.T) {
 	if obj == nil {
 		t.Fatal("DeepCopyObject returned nil")
 	}
-	if _, ok := obj.(*ChangeGuardList); !ok {
-		t.Fatalf("DeepCopyObject returned %T, want *ChangeGuardList", obj)
+	if _, ok := obj.(*ChangeValidatorList); !ok {
+		t.Fatalf("DeepCopyObject returned %T, want *ChangeValidatorList", obj)
 	}
 }
 
@@ -190,8 +190,8 @@ func TestExistingResourcesCheck_DeepCopy_WithSameNamespace(t *testing.T) {
 	}
 }
 
-func TestChangeGuardStatus_DeepCopy(t *testing.T) {
-	original := &ChangeGuardStatus{
+func TestChangeValidatorStatus_DeepCopy(t *testing.T) {
+	original := &ChangeValidatorStatus{
 		ObservedGeneration: 3,
 		Conditions: []metav1.Condition{
 			{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"},

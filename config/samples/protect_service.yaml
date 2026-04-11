@@ -1,5 +1,5 @@
 ---
-# Example ChangeGuard that prevents a Service from being deleted while
+# Example ChangeValidator that prevents a Service from being deleted while
 # Pods matching its label selector are still running.
 #
 # Apply this alongside a Service named "my-service" that has:
@@ -10,7 +10,7 @@
 # Once applied, any DELETE on a Service in the "default" namespace will be
 # denied if Pods matching spec.selector still exist.
 apiVersion: earlywatch.io/v1alpha1
-kind: ChangeGuard
+kind: ChangeValidator
 metadata:
   name: protect-service-from-deletion
   namespace: default

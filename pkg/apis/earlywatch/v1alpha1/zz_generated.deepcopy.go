@@ -11,7 +11,7 @@ import (
 
 // DeepCopyInto copies all properties of this object into another object of the
 // same type that is provided as a pointer.
-func (in *ChangeGuard) DeepCopyInto(out *ChangeGuard) {
+func (in *ChangeValidator) DeepCopyInto(out *ChangeValidator) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
@@ -21,32 +21,32 @@ func (in *ChangeGuard) DeepCopyInto(out *ChangeGuard) {
 
 // DeepCopyObject returns a generically typed copy of an object that is in memory.
 // The input object is not touched.
-func (in *ChangeGuard) DeepCopyObject() runtime.Object {
+func (in *ChangeValidator) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
 	return nil
 }
 
-// DeepCopy returns a deep copy of a ChangeGuard.
-func (in *ChangeGuard) DeepCopy() *ChangeGuard {
+// DeepCopy returns a deep copy of a ChangeValidator.
+func (in *ChangeValidator) DeepCopy() *ChangeValidator {
 	if in == nil {
 		return nil
 	}
-	out := new(ChangeGuard)
+	out := new(ChangeValidator)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies all properties of this object into another object of the
 // same type that is provided as a pointer.
-func (in *ChangeGuardList) DeepCopyInto(out *ChangeGuardList) {
+func (in *ChangeValidatorList) DeepCopyInto(out *ChangeValidatorList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
-		*out = make([]ChangeGuard, len(*in))
+		*out = make([]ChangeValidator, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
@@ -55,26 +55,26 @@ func (in *ChangeGuardList) DeepCopyInto(out *ChangeGuardList) {
 
 // DeepCopyObject returns a generically typed copy of an object that is in memory.
 // The input object is not touched.
-func (in *ChangeGuardList) DeepCopyObject() runtime.Object {
+func (in *ChangeValidatorList) DeepCopyObject() runtime.Object {
 	if c := in.DeepCopy(); c != nil {
 		return c
 	}
 	return nil
 }
 
-// DeepCopy returns a deep copy of a ChangeGuardList.
-func (in *ChangeGuardList) DeepCopy() *ChangeGuardList {
+// DeepCopy returns a deep copy of a ChangeValidatorList.
+func (in *ChangeValidatorList) DeepCopy() *ChangeValidatorList {
 	if in == nil {
 		return nil
 	}
-	out := new(ChangeGuardList)
+	out := new(ChangeValidatorList)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies all properties of this object into another object of the
 // same type that is provided as a pointer.
-func (in *ChangeGuardSpec) DeepCopyInto(out *ChangeGuardSpec) {
+func (in *ChangeValidatorSpec) DeepCopyInto(out *ChangeValidatorSpec) {
 	*out = *in
 	in.Subject.DeepCopyInto(&out.Subject)
 	if in.Operations != nil {
@@ -91,19 +91,19 @@ func (in *ChangeGuardSpec) DeepCopyInto(out *ChangeGuardSpec) {
 	}
 }
 
-// DeepCopy returns a deep copy of a ChangeGuardSpec.
-func (in *ChangeGuardSpec) DeepCopy() *ChangeGuardSpec {
+// DeepCopy returns a deep copy of a ChangeValidatorSpec.
+func (in *ChangeValidatorSpec) DeepCopy() *ChangeValidatorSpec {
 	if in == nil {
 		return nil
 	}
-	out := new(ChangeGuardSpec)
+	out := new(ChangeValidatorSpec)
 	in.DeepCopyInto(out)
 	return out
 }
 
 // DeepCopyInto copies all properties of this object into another object of the
 // same type that is provided as a pointer.
-func (in *ChangeGuardStatus) DeepCopyInto(out *ChangeGuardStatus) {
+func (in *ChangeValidatorStatus) DeepCopyInto(out *ChangeValidatorStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
@@ -114,12 +114,12 @@ func (in *ChangeGuardStatus) DeepCopyInto(out *ChangeGuardStatus) {
 	}
 }
 
-// DeepCopy returns a deep copy of a ChangeGuardStatus.
-func (in *ChangeGuardStatus) DeepCopy() *ChangeGuardStatus {
+// DeepCopy returns a deep copy of a ChangeValidatorStatus.
+func (in *ChangeValidatorStatus) DeepCopy() *ChangeValidatorStatus {
 	if in == nil {
 		return nil
 	}
-	out := new(ChangeGuardStatus)
+	out := new(ChangeValidatorStatus)
 	in.DeepCopyInto(out)
 	return out
 }

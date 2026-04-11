@@ -18,7 +18,7 @@ var (
 )
 
 func init() {
-	SchemeBuilder.Register(&ChangeGuard{}, &ChangeGuardList{})
+	SchemeBuilder.Register(&ChangeValidator{}, &ChangeValidatorList{})
 }
 
 // Resource returns a GroupResource for the given resource string.

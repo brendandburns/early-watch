@@ -8,7 +8,7 @@ For example, EarlyWatch can prevent you from deleting a `Service` while there ar
 
 ## How It Works
 
-EarlyWatch introduces a `ChangeGuard` custom resource.  Each `ChangeGuard` watches a specific Kubernetes resource type and defines a set of safety rules.  When an admission request matches a guard's subject and operations, the EarlyWatch webhook evaluates the rules against the current cluster state.  If any rule is violated the request is **denied** with a clear error message.
+EarlyWatch introduces a `ChangeValidator` custom resource.  Each `ChangeValidator` watches a specific Kubernetes resource type and defines a set of safety rules.  When an admission request matches a guard's subject and operations, the EarlyWatch webhook evaluates the rules against the current cluster state.  If any rule is violated the request is **denied** with a clear error message.
 
 ```
 User/CI → kubectl delete service my-svc
@@ -20,7 +20,7 @@ User/CI → kubectl delete service my-svc
               ▼
     EarlyWatch Webhook
               │
-              │ lists ChangeGuard rules for "services"
+              │ lists ChangeValidator rules for "services"
               │ queries cluster for matching Pods
               ▼
     DENY: "This Service cannot be deleted because Pods that
@@ -31,13 +31,13 @@ User/CI → kubectl delete service my-svc
 
 ## Custom Resources
 
-### `ChangeGuard` (`earlywatch.io/v1alpha1`)
+### `ChangeValidator` (`earlywatch.io/v1alpha1`)
 
-A `ChangeGuard` defines the resources to watch, the operations to intercept, and the safety rules to enforce.
+A `ChangeValidator` defines the resources to watch, the operations to intercept, and the safety rules to enforce.
 
 ```yaml
 apiVersion: earlywatch.io/v1alpha1
-kind: ChangeGuard
+kind: ChangeValidator
 metadata:
   name: protect-service-from-deletion
   namespace: default
@@ -75,7 +75,7 @@ spec:
 | `ExistingResources` | Denies the request when dependent resources (e.g. Pods) still exist in the cluster. |
 | `ExpressionCheck` | Evaluates a simple expression against the admission request (e.g. `operation == 'DELETE'`). |
 
-Full CRD schema: [`config/crd/bases/earlywatch.io_changeguards.yaml`](config/crd/bases/earlywatch.io_changeguards.yaml)
+Full CRD schema: [`config/crd/bases/earlywatch.io_changevalidators.yaml`](config/crd/bases/earlywatch.io_changevalidators.yaml)
 
 ---
 
@@ -90,7 +90,7 @@ early-watch/
 │   ├── apis/
 │   │   └── earlywatch/
 │   │       └── v1alpha1/
-│   │           ├── changeguard_types.go      # ChangeGuard Go type definitions
+│   │           ├── changevalidator_types.go      # ChangeValidator Go type definitions
 │   │           ├── groupversion_info.go      # Scheme registration
 │   │           └── zz_generated.deepcopy.go  # DeepCopy implementations
 │   └── webhook/
@@ -99,7 +99,7 @@ early-watch/
 ├── config/
 │   ├── crd/
 │   │   └── bases/
-│   │       └── earlywatch.io_changeguards.yaml  # CRD manifest
+│   │       └── earlywatch.io_changevalidators.yaml  # CRD manifest
 │   ├── webhook/
 │   │   ├── manifests.yaml            # ValidatingWebhookConfiguration
 │   │   ├── service.yaml              # Webhook Service
@@ -108,7 +108,7 @@ early-watch/
 │   │   ├── role.yaml                 # ClusterRole
 │   │   └── role_binding.yaml         # ClusterRoleBinding + ServiceAccount
 │   └── samples/
-│       └── protect_service.yaml      # Example ChangeGuard
+│       └── protect_service.yaml      # Example ChangeValidator
 ├── go.mod
 └── README.md
 ```
@@ -140,7 +140,7 @@ go test ./...
 
 1. **Install the CRD**:
    ```bash
-   kubectl apply -f config/crd/bases/earlywatch.io_changeguards.yaml
+   kubectl apply -f config/crd/bases/earlywatch.io_changevalidators.yaml
    ```
 
 2. **Create the namespace and RBAC**:
@@ -154,7 +154,7 @@ go test ./...
    kubectl apply -f config/webhook/
    ```
 
-4. **Apply a sample ChangeGuard**:
+4. **Apply a sample ChangeValidator**:
    ```bash
    kubectl apply -f config/samples/protect_service.yaml
    ```

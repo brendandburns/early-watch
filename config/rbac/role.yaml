@@ -8,20 +8,20 @@ metadata:
     app.kubernetes.io/name: early-watch
     app.kubernetes.io/component: webhook
 rules:
-  # Read ChangeGuard custom resources to evaluate rules.
+  # Read ChangeValidator custom resources to evaluate rules.
   - apiGroups:
       - earlywatch.io
     resources:
-      - changeguards
+      - changevalidators
     verbs:
       - get
       - list
       - watch
-  # Update ChangeGuard status subresource.
+  # Update ChangeValidator status subresource.
   - apiGroups:
       - earlywatch.io
     resources:
-      - changeguards/status
+      - changevalidators/status
     verbs:
       - get
       - patch

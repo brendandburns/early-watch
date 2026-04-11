@@ -6,8 +6,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ChangeGuardSpec defines the desired state of ChangeGuard.
-type ChangeGuardSpec struct {
+// ChangeValidatorSpec defines the desired state of ChangeValidator.
+type ChangeValidatorSpec struct {
 	// Subject describes the Kubernetes resource that this guard watches.
 	Subject SubjectResource `json:"subject"`
 
@@ -50,7 +50,7 @@ const (
 	OperationConnect OperationType = "CONNECT"
 )
 
-// GuardRule is a single safety check within a ChangeGuard.
+// GuardRule is a single safety check within a ChangeValidator.
 type GuardRule struct {
 	// Name is a human-readable identifier for this rule.
 	Name string `json:"name"`
@@ -131,10 +131,10 @@ type ExpressionCheck struct {
 	Expression string `json:"expression"`
 }
 
-// ChangeGuardStatus defines the observed state of ChangeGuard.
-type ChangeGuardStatus struct {
+// ChangeValidatorStatus defines the observed state of ChangeValidator.
+type ChangeValidatorStatus struct {
 	// Conditions represent the latest available observations of the
-	// ChangeGuard's current state.
+	// ChangeValidator's current state.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
@@ -146,28 +146,28 @@ type ChangeGuardStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced,shortName=cg,categories=earlywatch
+// +kubebuilder:resource:scope=Namespaced,shortName=cv,categories=earlywatch
 // +kubebuilder:printcolumn:name="Resource",type=string,JSONPath=`.spec.subject.resource`
 // +kubebuilder:printcolumn:name="Operations",type=string,JSONPath=`.spec.operations`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// ChangeGuard is the Schema for the changeguards API.
-// A ChangeGuard defines a set of safety rules that the EarlyWatch
+// ChangeValidator is the Schema for the changevalidators API.
+// A ChangeValidator defines a set of safety rules that the EarlyWatch
 // admission controller evaluates before allowing a change to a
 // Kubernetes resource.
-type ChangeGuard struct {
+type ChangeValidator struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ChangeGuardSpec   `json:"spec,omitempty"`
-	Status ChangeGuardStatus `json:"status,omitempty"`
+	Spec   ChangeValidatorSpec   `json:"spec,omitempty"`
+	Status ChangeValidatorStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// ChangeGuardList contains a list of ChangeGuard.
-type ChangeGuardList struct {
+// ChangeValidatorList contains a list of ChangeValidator.
+type ChangeValidatorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ChangeGuard `json:"items"`
+	Items           []ChangeValidator `json:"items"`
 }

@@ -21,7 +21,7 @@ import (
 )
 
 // AdmissionHandler handles admission webhook requests by evaluating
-// ChangeGuard rules registered in the cluster.
+// ChangeValidator rules registered in the cluster.
 type AdmissionHandler struct {
 	Client        client.Client
 	DynamicClient dynamic.Interface
@@ -40,18 +40,18 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 
 	logger.Info("Evaluating admission request")
 
-	// List all ChangeGuards in the same namespace as the subject resource.
-	guardList := &ewv1alpha1.ChangeGuardList{}
+	// List all ChangeValidators in the same namespace as the subject resource.
+	guardList := &ewv1alpha1.ChangeValidatorList{}
 	if err := h.Client.List(ctx, guardList, &client.ListOptions{Namespace: req.Namespace}); err != nil {
-		logger.Error(err, "Failed to list ChangeGuards")
+		logger.Error(err, "Failed to list ChangeValidators")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	// Also fetch cluster-scoped guards (namespace == "").
 	if req.Namespace != "" {
-		clusterGuardList := &ewv1alpha1.ChangeGuardList{}
+		clusterGuardList := &ewv1alpha1.ChangeValidatorList{}
 		if err := h.Client.List(ctx, clusterGuardList, &client.ListOptions{}); err != nil {
-			logger.Error(err, "Failed to list cluster-scoped ChangeGuards")
+			logger.Error(err, "Failed to list cluster-scoped ChangeValidators")
 			return admission.Errored(http.StatusInternalServerError, err)
 		}
 		guardList.Items = append(guardList.Items, clusterGuardList.Items...)
@@ -62,7 +62,7 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 			continue
 		}
 
-		logger.Info("Evaluating ChangeGuard", "guard", guard.Name)
+		logger.Info("Evaluating ChangeValidator", "guard", guard.Name)
 
 		for _, rule := range guard.Spec.Rules {
 			violated, message, err := h.evaluateRule(ctx, rule, req)
@@ -71,7 +71,7 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 				return admission.Errored(http.StatusInternalServerError, err)
 			}
 			if violated {
-				logger.Info("Request denied by ChangeGuard rule",
+				logger.Info("Request denied by ChangeValidator rule",
 					"guard", guard.Name,
 					"rule", rule.Name,
 					"message", message,
@@ -81,12 +81,12 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 		}
 	}
 
-	return admission.Allowed("no ChangeGuard rules violated")
+	return admission.Allowed("no ChangeValidator rules violated")
 }
 
 // appliesToRequest returns true when the guard matches the admission request's
 // resource type and operation.
-func appliesToRequest(guard *ewv1alpha1.ChangeGuard, req admission.Request) bool {
+func appliesToRequest(guard *ewv1alpha1.ChangeValidator, req admission.Request) bool {
 	subj := guard.Spec.Subject
 
 	// Match API group.
