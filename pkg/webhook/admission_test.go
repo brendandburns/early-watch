@@ -1168,6 +1168,74 @@ func TestHandle_NameReferenceCheck_AllowedWhenNoWorkloads(t *testing.T) {
 	}
 }
 
+// --- renderMessage tests ---
+
+func TestRenderMessage_NoPlaceholders(t *testing.T) {
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	msg := renderMessage("resource cannot be deleted", req)
+	if msg != "resource cannot be deleted" {
+		t.Errorf("expected message unchanged, got %q", msg)
+	}
+}
+
+func TestRenderMessage_AllPlaceholders(t *testing.T) {
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Delete,
+			Resource: metav1.GroupVersionResource{
+				Group:    "apps",
+				Version:  "v1",
+				Resource: "deployments",
+			},
+			Namespace: "production",
+			Name:      "my-deploy",
+		},
+	}
+	tmpl := "{{operation}} of {{resource}} \"{{name}}\" in namespace \"{{namespace}}\" (group: {{apiGroup}}) denied"
+	got := renderMessage(tmpl, req)
+	want := `DELETE of deployments "my-deploy" in namespace "production" (group: apps) denied`
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestRenderMessage_NamePlaceholder(t *testing.T) {
+	req := makeRequest(admissionv1.Delete, "", "secrets", "default", "my-secret", nil)
+	got := renderMessage(`Secret "{{name}}" cannot be deleted`, req)
+	want := `Secret "my-secret" cannot be deleted`
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestRenderMessage_NamespacePlaceholder(t *testing.T) {
+	req := makeRequest(admissionv1.Delete, "", "services", "staging", "svc1", nil)
+	got := renderMessage("namespace {{namespace}}", req)
+	want := "namespace staging"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+// TestEvaluateExpression_TemplateMessage verifies that the denial message is
+// rendered with the admission request context when an ExpressionCheck fires.
+func TestEvaluateExpression_TemplateMessage(t *testing.T) {
+	check := ewv1alpha1.ExpressionCheck{Expression: "operation == 'DELETE'"}
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+
+	violated, msg, err := evaluateExpression(check, `Cannot {{operation}} "{{name}}"`, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Fatal("expected expression to be violated")
+	}
+	want := `Cannot DELETE "my-svc"`
+	if msg != want {
+		t.Errorf("expected message %q, got %q", want, msg)
+	}
+}
+
 // --- CheckLock rule tests ---
 
 // lockedServiceObj returns a minimal Service object with the lock annotation set.
