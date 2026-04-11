@@ -670,7 +670,7 @@ func TestApprovalCheck_DeleteDeniedWithWrongKey(t *testing.T) {
 		},
 	})
 
-	cm := makeConfigMap(t, "wrong-key-cm")
+	makeConfigMap(t, "wrong-key-cm")
 
 	// Sign with key1 but the guard expects key2.
 	approveResource(t, privKey1, annotationKey, "", "v1", "configmaps", testNamespace, "wrong-key-cm")
