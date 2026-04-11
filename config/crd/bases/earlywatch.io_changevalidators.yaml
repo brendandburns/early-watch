@@ -2,18 +2,18 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: changeguards.earlywatch.io
+  name: changevalidators.earlywatch.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
 spec:
   group: earlywatch.io
   names:
-    kind: ChangeGuard
-    listKind: ChangeGuardList
-    plural: changeguards
-    singular: changeguard
+    kind: ChangeValidator
+    listKind: ChangeValidatorList
+    plural: changevalidators
+    singular: changevalidator
     shortNames:
-      - cg
+      - cv
     categories:
       - earlywatch
   scope: Namespaced
@@ -36,8 +36,8 @@ spec:
       schema:
         openAPIV3Schema:
           description: >
-            ChangeGuard is the Schema for the changeguards API.
-            A ChangeGuard defines a set of safety rules that the EarlyWatch
+            ChangeValidator is the Schema for the changevalidators API.
+            A ChangeValidator defines a set of safety rules that the EarlyWatch
             admission controller evaluates before allowing a change to a
             Kubernetes resource.
           type: object
@@ -56,7 +56,7 @@ spec:
             metadata:
               type: object
             spec:
-              description: ChangeGuardSpec defines the desired state of ChangeGuard.
+              description: ChangeValidatorSpec defines the desired state of ChangeValidator.
               type: object
               required:
                 - subject
@@ -145,7 +145,7 @@ spec:
                   type: array
                   minItems: 1
                   items:
-                    description: GuardRule is a single safety check within a ChangeGuard.
+                    description: GuardRule is a single safety check within a ChangeValidator.
                     type: object
                     required:
                       - name
@@ -249,13 +249,13 @@ spec:
                               denied.
                             type: string
             status:
-              description: ChangeGuardStatus defines the observed state of ChangeGuard.
+              description: ChangeValidatorStatus defines the observed state of ChangeValidator.
               type: object
               properties:
                 conditions:
                   description: >
                     Conditions represent the latest available observations of
-                    the ChangeGuard's current state.
+                    the ChangeValidator's current state.
                   type: array
                   items:
                     description: Condition contains details for one aspect of the current state of this API Resource.

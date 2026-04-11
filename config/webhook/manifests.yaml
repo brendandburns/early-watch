@@ -24,7 +24,7 @@ webhooks:
       # caBundle is populated by cert-manager or must be set manually.
       # caBundle: ""
     rules:
-      # The webhook is registered for ALL resources so that ChangeGuard rules
+      # The webhook is registered for ALL resources so that ChangeValidator rules
       # can target any resource type without requiring a webhook restart.
       - apiGroups:
           - "*"
