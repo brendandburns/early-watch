@@ -1,0 +1,41 @@
+---
+# ChangeValidator that prevents a Service from being deleted while it is
+# still referenced as a backend by any Ingress resource in the same namespace.
+#
+# Ingress resources can reference a Service in two places:
+#   • spec.defaultBackend.service.name        (catch-all / default backend)
+#   • spec.rules[*].http.paths[*].backend.service.name
+#                                             (per-path routing rules)
+#
+# Array elements along every path are traversed automatically, so there is no
+# need for wildcard syntax in the field paths.
+#
+# Once applied, a DELETE on any Service in the "default" namespace is denied
+# when at least one Ingress references it as a backend.
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: protect-service-from-deletion-ingress
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""        # core API group
+    resource: services
+  operations:
+    - DELETE
+  rules:
+    - name: service-not-referenced-by-ingress
+      type: NameReferenceCheck
+      nameReferenceCheck:
+        sameNamespace: true
+        resources:
+          - apiGroup: networking.k8s.io
+            resource: ingresses
+            version: v1
+            nameFields:
+              - spec.defaultBackend.service.name
+              - spec.rules.http.paths.backend.service.name
+      message: >
+        This Service cannot be deleted because it is still referenced as a
+        backend by one or more Ingress resources. Update or remove all Ingress
+        backend references to this Service before deleting it.
