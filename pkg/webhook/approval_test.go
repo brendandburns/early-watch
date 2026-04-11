@@ -92,7 +92,7 @@ func TestResourcePath_Namespaced(t *testing.T) {
 
 func TestResourcePath_ClusterScoped(t *testing.T) {
 	got := ResourcePath("", "v1", "namespaces", "", "my-ns")
-	want := "/v1/namespaces/my-ns"
+	want := "v1/namespaces/my-ns"
 	if got != want {
 		t.Errorf("ResourcePath() = %q; want %q", got, want)
 	}
@@ -100,7 +100,7 @@ func TestResourcePath_ClusterScoped(t *testing.T) {
 
 func TestResourcePath_CoreNamespaced(t *testing.T) {
 	got := ResourcePath("", "v1", "configmaps", "kube-system", "my-cm")
-	want := "/v1/namespaces/kube-system/configmaps/my-cm"
+	want := "v1/namespaces/kube-system/configmaps/my-cm"
 	if got != want {
 		t.Errorf("ResourcePath() = %q; want %q", got, want)
 	}

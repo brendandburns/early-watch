@@ -402,13 +402,19 @@ const defaultApprovalAnnotation = "earlywatch.io/approved"
 //
 // Format:
 //
-//	<group>/<version>/namespaces/<namespace>/<resource>/<name>   (namespaced)
-//	<group>/<version>/<resource>/<name>                          (cluster-scoped)
+//	<group>/<version>/namespaces/<namespace>/<resource>/<name>   (namespaced, named group)
+//	<version>/namespaces/<namespace>/<resource>/<name>           (namespaced, core group)
+//	<group>/<version>/<resource>/<name>                          (cluster-scoped, named group)
+//	<version>/<resource>/<name>                                  (cluster-scoped, core group)
 func ResourcePath(group, version, resource, namespace, name string) string {
-	if namespace != "" {
-		return fmt.Sprintf("%s/%s/namespaces/%s/%s/%s", group, version, namespace, resource, name)
+	prefix := version
+	if group != "" {
+		prefix = group + "/" + version
 	}
-	return fmt.Sprintf("%s/%s/%s/%s", group, version, resource, name)
+	if namespace != "" {
+		return fmt.Sprintf("%s/namespaces/%s/%s/%s", prefix, namespace, resource, name)
+	}
+	return fmt.Sprintf("%s/%s/%s", prefix, resource, name)
 }
 
 // evaluateApprovalCheck verifies that the resource being acted on carries a

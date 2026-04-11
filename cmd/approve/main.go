@@ -133,8 +133,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Successfully annotated %s %s/%s with approval signature for path %q\n",
-		resource, namespace, name, path)
+	location := name
+	if namespace != "" {
+		location = namespace + "/" + name
+	}
+	fmt.Printf("Successfully annotated %s %s with approval signature for path %q\n",
+		resource, location, path)
 }
 
 // loadRSAPrivateKey reads and parses a PEM-encoded RSA private key from disk.
