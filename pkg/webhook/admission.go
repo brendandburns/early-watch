@@ -148,8 +148,14 @@ func (h *AdmissionHandler) evaluateExistingResources(
 
 	switch {
 	case check.LabelSelectorFromField != "":
+		// For DELETE requests, the object being deleted is in OldObject rather
+		// than Object (which is nil for deletes).
+		raw := req.Object.Raw
+		if len(raw) == 0 {
+			raw = req.OldObject.Raw
+		}
 		// Extract selector from the subject object's field.
-		sel, err = selectorFromField(req.Object.Raw, check.LabelSelectorFromField)
+		sel, err = selectorFromField(raw, check.LabelSelectorFromField)
 		if err != nil {
 			return false, "", fmt.Errorf("extracting selector from field %q: %w", check.LabelSelectorFromField, err)
 		}
