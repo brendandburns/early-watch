@@ -177,7 +177,7 @@ func cleanupNamespace(t *testing.T) {
 
 	// Delete all ChangeGuards.  The webhook allows this because no guard
 	// protects earlywatch.io/changeguards resources.
-	guardList := &ewv1alpha1.ChangeGuardList{}
+	guardList := &ewv1alpha1.ChangeValidatorList{}
 	if err := k8sClient.List(ctx, guardList, client.InNamespace(testNamespace)); err == nil {
 		for i := range guardList.Items {
 			_ = k8sClient.Delete(ctx, &guardList.Items[i])
@@ -185,7 +185,7 @@ func cleanupNamespace(t *testing.T) {
 	}
 
 	// Also delete any cluster-wide guards that may have been created.
-	allGuards := &ewv1alpha1.ChangeGuardList{}
+	allGuards := &ewv1alpha1.ChangeValidatorList{}
 	if err := k8sClient.List(ctx, allGuards); err == nil {
 		for i := range allGuards.Items {
 			_ = k8sClient.Delete(ctx, &allGuards.Items[i])
@@ -196,7 +196,7 @@ func cleanupNamespace(t *testing.T) {
 	// of resources that were protected by those guards.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		list := &ewv1alpha1.ChangeGuardList{}
+		list := &ewv1alpha1.ChangeValidatorList{}
 		if err := k8sClient.List(ctx, list, client.InNamespace(testNamespace)); err == nil && len(list.Items) == 0 {
 			break
 		}
@@ -229,7 +229,7 @@ func cleanupNamespace(t *testing.T) {
 // --- resource helpers ---
 
 // makeChangeGuard creates a ChangeGuard in testNamespace.
-func makeChangeGuard(t *testing.T, guard *ewv1alpha1.ChangeGuard) {
+func makeChangeGuard(t *testing.T, guard *ewv1alpha1.ChangeValidator) {
 	t.Helper()
 	guard.Namespace = testNamespace
 	if err := k8sClient.Create(context.Background(), guard); err != nil {
@@ -303,9 +303,9 @@ func TestExpressionCheck_DeniesMatchingOperation(t *testing.T) {
 	cleanupNamespace(t)
 	t.Cleanup(func() { cleanupNamespace(t) })
 
-	makeChangeGuard(t, &ewv1alpha1.ChangeGuard{
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-cm-delete"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{{
@@ -335,9 +335,9 @@ func TestExpressionCheck_AllowsNonTargetedOperation(t *testing.T) {
 	cleanupNamespace(t)
 	t.Cleanup(func() { cleanupNamespace(t) })
 
-	makeChangeGuard(t, &ewv1alpha1.ChangeGuard{
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "deny-cm-delete-only"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{{
@@ -366,9 +366,9 @@ func TestExistingResources_DeniesWhenDependentsPresent(t *testing.T) {
 
 	makePod(t, "running-pod", nil)
 
-	makeChangeGuard(t, &ewv1alpha1.ChangeGuard{
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "block-cm-if-pods"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{{
@@ -401,9 +401,9 @@ func TestExistingResources_AllowsWhenNoDependents(t *testing.T) {
 	t.Cleanup(func() { cleanupNamespace(t) })
 
 	// No pods are created; the guard should not fire.
-	makeChangeGuard(t, &ewv1alpha1.ChangeGuard{
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "block-cm-if-pods"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{{
@@ -434,9 +434,9 @@ func TestExistingResources_LabelSelector_DeniesWhenMatchingPodsPresent(t *testin
 
 	makePod(t, "app-pod", map[string]string{"app": "my-app"})
 
-	makeChangeGuard(t, &ewv1alpha1.ChangeGuard{
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "protect-service"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{{
@@ -473,9 +473,9 @@ func TestExistingResources_LabelSelector_AllowsWhenNoMatchingPods(t *testing.T) 
 	// Pod has a different label and will not match the Service selector.
 	makePod(t, "other-pod", map[string]string{"app": "other-app"})
 
-	makeChangeGuard(t, &ewv1alpha1.ChangeGuard{
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
 		ObjectMeta: metav1.ObjectMeta{Name: "protect-service-no-match"},
-		Spec: ewv1alpha1.ChangeGuardSpec{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
 			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
 			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
 			Rules: []ewv1alpha1.GuardRule{{
