@@ -28,7 +28,7 @@ spec:
         # automatically uses the name of the namespace being deleted as the
         # scope so that it searches for Pods inside that namespace.
       message: >
-        This Namespace cannot be deleted because it still contains Pods.
+        Namespace "{{name}}" cannot be deleted because it still contains Pods.
         Delete or evict all Pods before removing the Namespace.
 
 ---
@@ -56,5 +56,5 @@ spec:
         apiGroup: ""  # core API group
         resource: pods
       message: >
-        This Namespace cannot be deleted because it still contains Pods.
+        Namespace "{{name}}" cannot be deleted because it still contains Pods.
         Delete or evict all Pods before removing the Namespace.
