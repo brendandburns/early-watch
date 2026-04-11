@@ -140,6 +140,12 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return evaluateExpression(*rule.ExpressionCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeNameReferenceCheck:
+		if rule.NameReferenceCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type NameReferenceCheck but no nameReferenceCheck config", rule.Name)
+		}
+		return h.evaluateNameReferenceCheck(ctx, *rule.NameReferenceCheck, rule.Message, req)
+
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
 	}
@@ -214,6 +220,78 @@ func (h *AdmissionHandler) evaluateExistingResources(
 	}
 
 	return false, "", nil
+}
+
+// evaluateNameReferenceCheck lists resources of each specified type and denies
+// the request if any resource references the subject by name at the configured
+// field paths.
+func (h *AdmissionHandler) evaluateNameReferenceCheck(
+	ctx context.Context,
+	check ewv1alpha1.NameReferenceCheck,
+	message string,
+	req admission.Request,
+) (bool, string, error) {
+	namespace := ""
+	if check.SameNamespace == nil || *check.SameNamespace {
+		namespace = req.Namespace
+	}
+
+	for _, res := range check.Resources {
+		version := res.Version
+		if version == "" {
+			version = "v1"
+		}
+		gvr := schema.GroupVersionResource{
+			Group:    res.APIGroup,
+			Version:  version,
+			Resource: res.Resource,
+		}
+
+		result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return false, "", fmt.Errorf("listing %s: %w", res.Resource, err)
+		}
+
+		for _, item := range result.Items {
+			for _, fieldPath := range res.NameFields {
+				if nameExistsAtPath(item.Object, strings.Split(fieldPath, "."), req.Name) {
+					return true, message, nil
+				}
+			}
+		}
+	}
+
+	return false, "", nil
+}
+
+// nameExistsAtPath reports whether the given name appears as a string value at
+// the end of the dot-split path parts within obj.  Array elements encountered
+// along the path are all traversed so that references nested inside slices
+// (e.g. volumes, containers, envFrom) are detected without needing wildcard
+// syntax in the field path.
+func nameExistsAtPath(current interface{}, parts []string, name string) bool {
+	if len(parts) == 0 {
+		str, ok := current.(string)
+		return ok && str == name
+	}
+
+	switch v := current.(type) {
+	case map[string]interface{}:
+		next, ok := v[parts[0]]
+		if !ok {
+			return false
+		}
+		return nameExistsAtPath(next, parts[1:], name)
+	case []interface{}:
+		// Traverse every element without consuming a path part so that array
+		// elements are treated transparently.
+		for _, elem := range v {
+			if nameExistsAtPath(elem, parts, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // selectorFromField extracts a label selector from a dot-separated field path

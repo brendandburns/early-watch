@@ -164,6 +164,11 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(ExpressionCheck)
 		**out = **in
 	}
+	if in.NameReferenceCheck != nil {
+		in, out := &in.NameReferenceCheck, &out.NameReferenceCheck
+		*out = new(NameReferenceCheck)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 // DeepCopy returns a deep copy of a GuardRule.
@@ -209,5 +214,54 @@ func (in *ExpressionCheck) DeepCopy() *ExpressionCheck {
 	}
 	out := new(ExpressionCheck)
 	*out = *in
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *NameReferenceCheck) DeepCopyInto(out *NameReferenceCheck) {
+	*out = *in
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = make([]NameReferenceResource, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.SameNamespace != nil {
+		in, out := &in.SameNamespace, &out.SameNamespace
+		*out = new(bool)
+		**out = **in
+	}
+}
+
+// DeepCopy returns a deep copy of a NameReferenceCheck.
+func (in *NameReferenceCheck) DeepCopy() *NameReferenceCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(NameReferenceCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *NameReferenceResource) DeepCopyInto(out *NameReferenceResource) {
+	*out = *in
+	if in.NameFields != nil {
+		in, out := &in.NameFields, &out.NameFields
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy returns a deep copy of a NameReferenceResource.
+func (in *NameReferenceResource) DeepCopy() *NameReferenceResource {
+	if in == nil {
+		return nil
+	}
+	out := new(NameReferenceResource)
+	in.DeepCopyInto(out)
 	return out
 }

@@ -63,7 +63,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -78,6 +78,13 @@ type GuardRule struct {
 	// Required when Type is ExpressionCheck.
 	// +optional
 	ExpressionCheck *ExpressionCheck `json:"expressionCheck,omitempty"`
+
+	// NameReferenceCheck checks whether the subject resource is referenced by
+	// name in other cluster resources and denies the request when any such
+	// references are found.
+	// Required when Type is NameReferenceCheck.
+	// +optional
+	NameReferenceCheck *NameReferenceCheck `json:"nameReferenceCheck,omitempty"`
 
 	// Message is the human-readable denial message returned to the user
 	// when this rule is violated.
@@ -95,6 +102,10 @@ const (
 	// RuleTypeExpressionCheck denies the request when a CEL expression
 	// evaluates to true against the admission request object.
 	RuleTypeExpressionCheck RuleType = "ExpressionCheck"
+
+	// RuleTypeNameReferenceCheck denies the request when the subject resource
+	// is referenced by name in other cluster resources.
+	RuleTypeNameReferenceCheck RuleType = "NameReferenceCheck"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent
@@ -136,6 +147,48 @@ type ExpressionCheck struct {
 	// and must return a boolean.  When true, the request is denied.
 	// Example: "request.operation == 'DELETE' && request.object == null"
 	Expression string `json:"expression"`
+}
+
+// NameReferenceCheck describes a check that finds resources which reference
+// the subject resource by name and blocks the operation when any such
+// references are found.
+type NameReferenceCheck struct {
+	// Resources is the list of resource types to scan for references to the
+	// subject resource.
+	// +kubebuilder:validation:MinItems=1
+	Resources []NameReferenceResource `json:"resources"`
+
+	// SameNamespace, when true, restricts the lookup to the same namespace
+	// as the subject resource.  Defaults to true.
+	// +kubebuilder:default=true
+	// +optional
+	SameNamespace *bool `json:"sameNamespace,omitempty"`
+}
+
+// NameReferenceResource describes a single resource type to scan for
+// references to the subject resource by name.
+type NameReferenceResource struct {
+	// APIGroup is the API group of the resource type to scan.
+	// Use "" for core resources and "apps" for Deployments/DaemonSets.
+	// +optional
+	APIGroup string `json:"apiGroup,omitempty"`
+
+	// Resource is the plural name of the resource type to scan,
+	// e.g. "deployments", "daemonsets", "cronjobs".
+	Resource string `json:"resource"`
+
+	// Version is the API version of the resource type to scan.
+	// Defaults to "v1" when omitted.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// NameFields is the list of dot-separated JSON field paths at which
+	// the subject resource's name might appear.  Array elements encountered
+	// along any path are traversed automatically.  For example, to detect a
+	// ConfigMap volume reference use
+	// "spec.template.spec.volumes.configMap.name".
+	// +kubebuilder:validation:MinItems=1
+	NameFields []string `json:"nameFields"`
 }
 
 // ChangeValidatorStatus defines the observed state of ChangeValidator.

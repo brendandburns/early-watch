@@ -7,6 +7,8 @@ import (
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -775,4 +777,393 @@ func (s labelSet) Has(label string) bool {
 
 func (s labelSet) Get(label string) string {
 	return s[label]
+}
+
+// --- nameExistsAtPath tests ---
+
+func TestNameExistsAtPath_SimpleMatch(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"configMap": map[string]interface{}{
+				"name": "my-cm",
+			},
+		},
+	}
+	if !nameExistsAtPath(obj, []string{"spec", "configMap", "name"}, "my-cm") {
+		t.Error("expected name to be found at path")
+	}
+}
+
+func TestNameExistsAtPath_NoMatch(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"configMap": map[string]interface{}{
+				"name": "other-cm",
+			},
+		},
+	}
+	if nameExistsAtPath(obj, []string{"spec", "configMap", "name"}, "my-cm") {
+		t.Error("expected name NOT to be found when value differs")
+	}
+}
+
+func TestNameExistsAtPath_MissingField(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{},
+	}
+	if nameExistsAtPath(obj, []string{"spec", "configMap", "name"}, "my-cm") {
+		t.Error("expected false for missing field path")
+	}
+}
+
+func TestNameExistsAtPath_TraversesArray(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"volumes": []interface{}{
+				map[string]interface{}{
+					"name":      "data-vol",
+					"emptyDir": map[string]interface{}{},
+				},
+				map[string]interface{}{
+					"name": "config-vol",
+					"configMap": map[string]interface{}{
+						"name": "my-cm",
+					},
+				},
+			},
+		},
+	}
+	if !nameExistsAtPath(obj, []string{"spec", "volumes", "configMap", "name"}, "my-cm") {
+		t.Error("expected name to be found via array traversal")
+	}
+}
+
+func TestNameExistsAtPath_NestedArrays(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name": "app",
+					"envFrom": []interface{}{
+						map[string]interface{}{
+							"configMapRef": map[string]interface{}{
+								"name": "my-cm",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	if !nameExistsAtPath(obj, []string{"spec", "containers", "envFrom", "configMapRef", "name"}, "my-cm") {
+		t.Error("expected name to be found via nested array traversal")
+	}
+}
+
+func TestNameExistsAtPath_EmptyArray(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"volumes": []interface{}{},
+		},
+	}
+	if nameExistsAtPath(obj, []string{"spec", "volumes", "configMap", "name"}, "my-cm") {
+		t.Error("expected false for empty array")
+	}
+}
+
+// --- NameReferenceCheck rule evaluateRule tests ---
+
+func TestEvaluateRule_NilNameReferenceCheck(t *testing.T) {
+	h := &AdmissionHandler{}
+	rule := ewv1alpha1.GuardRule{
+		Name:               "bad-rule",
+		Type:               ewv1alpha1.RuleTypeNameReferenceCheck,
+		Message:            "msg",
+		NameReferenceCheck: nil,
+	}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-cm", nil)
+
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil NameReferenceCheck config")
+	}
+}
+
+// newFullHandlerScheme returns a runtime.Scheme with earlywatch, core, apps,
+// and batch types registered, which is required for NameReferenceCheck tests.
+func newFullHandlerScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := newHandlerScheme(t)
+	if err := appsv1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme (appsv1): %v", err)
+	}
+	if err := batchv1.AddToScheme(s); err != nil {
+		t.Fatalf("AddToScheme (batchv1): %v", err)
+	}
+	return s
+}
+
+// newConfigMapDeletionGuard builds a ChangeValidator that prevents deletion of
+// a ConfigMap when it is still referenced by Deployments, DaemonSets, or CronJobs.
+func newConfigMapDeletionGuard() *ewv1alpha1.ChangeValidator {
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-configmap", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "configmaps",
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "configmap-not-referenced-by-workloads",
+					Type:    ewv1alpha1.RuleTypeNameReferenceCheck,
+					Message: "ConfigMap is still in use",
+					NameReferenceCheck: &ewv1alpha1.NameReferenceCheck{
+						Resources: []ewv1alpha1.NameReferenceResource{
+							{
+								APIGroup: "apps",
+								Resource: "deployments",
+								Version:  "v1",
+								NameFields: []string{
+									"spec.template.spec.volumes.configMap.name",
+									"spec.template.spec.containers.envFrom.configMapRef.name",
+									"spec.template.spec.containers.env.valueFrom.configMapKeyRef.name",
+								},
+							},
+							{
+								APIGroup: "apps",
+								Resource: "daemonsets",
+								Version:  "v1",
+								NameFields: []string{
+									"spec.template.spec.volumes.configMap.name",
+									"spec.template.spec.containers.envFrom.configMapRef.name",
+								},
+							},
+							{
+								APIGroup: "batch",
+								Resource: "cronjobs",
+								Version:  "v1",
+								NameFields: []string{
+									"spec.jobTemplate.spec.template.spec.volumes.configMap.name",
+									"spec.jobTemplate.spec.template.spec.containers.envFrom.configMapRef.name",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestHandle_NameReferenceCheck_DeniedWhenDeploymentReferencesViaVolume verifies
+// that deleting a ConfigMap is denied when a Deployment mounts it as a volume.
+func TestHandle_NameReferenceCheck_DeniedWhenDeploymentReferencesViaVolume(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{
+						{
+							Name: "config-vol",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "my-configmap"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapDeletionGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-configmap", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected ConfigMap DELETE to be denied because a Deployment mounts it as a volume")
+	}
+}
+
+// TestHandle_NameReferenceCheck_DeniedWhenDeploymentReferencesViaEnvFrom verifies
+// that deleting a ConfigMap is denied when a Deployment injects it via envFrom.
+func TestHandle_NameReferenceCheck_DeniedWhenDeploymentReferencesViaEnvFrom(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							EnvFrom: []corev1.EnvFromSource{
+								{
+									ConfigMapRef: &corev1.ConfigMapEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{Name: "my-configmap"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapDeletionGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-configmap", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected ConfigMap DELETE to be denied because a Deployment references it via envFrom")
+	}
+}
+
+// TestHandle_NameReferenceCheck_DeniedWhenDaemonSetReferences verifies that
+// deleting a ConfigMap is denied when a DaemonSet references it.
+func TestHandle_NameReferenceCheck_DeniedWhenDaemonSetReferences(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-ds", Namespace: "default"},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{
+						{
+							Name: "config-vol",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "my-configmap"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapDeletionGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, ds)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-configmap", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected ConfigMap DELETE to be denied because a DaemonSet mounts it as a volume")
+	}
+}
+
+// TestHandle_NameReferenceCheck_DeniedWhenCronJobReferences verifies that
+// deleting a ConfigMap is denied when a CronJob references it.
+func TestHandle_NameReferenceCheck_DeniedWhenCronJobReferences(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	cj := &batchv1.CronJob{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-cj", Namespace: "default"},
+		Spec: batchv1.CronJobSpec{
+			Schedule: "*/5 * * * *",
+			JobTemplate: batchv1.JobTemplateSpec{
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{
+								{
+									Name:  "job",
+									Image: "job:latest",
+									EnvFrom: []corev1.EnvFromSource{
+										{
+											ConfigMapRef: &corev1.ConfigMapEnvSource{
+												LocalObjectReference: corev1.LocalObjectReference{Name: "my-configmap"},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapDeletionGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, cj)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-configmap", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected ConfigMap DELETE to be denied because a CronJob references it via envFrom")
+	}
+}
+
+// TestHandle_NameReferenceCheck_AllowedWhenNotReferenced verifies that
+// deleting a ConfigMap is allowed when no workloads reference it.
+func TestHandle_NameReferenceCheck_AllowedWhenNotReferenced(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	// Deployment references a different ConfigMap.
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Volumes: []corev1.Volume{
+						{
+							Name: "other-vol",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{Name: "other-configmap"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapDeletionGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-configmap", nil)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected ConfigMap DELETE to be allowed when no workload references it: %v", resp.Result)
+	}
+}
+
+// TestHandle_NameReferenceCheck_AllowedWhenNoWorkloads verifies that deleting
+// a ConfigMap is allowed when there are no workloads at all.
+func TestHandle_NameReferenceCheck_AllowedWhenNoWorkloads(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	guard := newConfigMapDeletionGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no workloads
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Delete, "", "configmaps", "default", "my-configmap", nil)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected ConfigMap DELETE to be allowed when no workloads exist: %v", resp.Result)
+	}
 }

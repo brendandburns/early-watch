@@ -1,0 +1,66 @@
+---
+# ChangeValidator that prevents a ConfigMap from being deleted while it is
+# still referenced by any Deployment, DaemonSet, or CronJob in the same
+# namespace.
+#
+# The NameReferenceCheck rule type lists each workload kind and specifies all
+# field paths at which a ConfigMap name may appear:
+#   • spec.template.spec.volumes[*].configMap.name        (volume mounts)
+#   • spec.template.spec.(init)containers[*].envFrom[*].configMapRef.name
+#                                                          (full env injection)
+#   • spec.template.spec.(init)containers[*].env[*].valueFrom.configMapKeyRef.name
+#                                                          (single key injection)
+#
+# Array elements along every path are traversed automatically, so there is no
+# need for wildcard syntax in the field paths.
+#
+# Once applied, a DELETE on any ConfigMap in the "default" namespace is denied
+# when at least one Deployment, DaemonSet, or CronJob references it.
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: protect-configmap-from-deletion
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""        # core API group
+    resource: configmaps
+  operations:
+    - DELETE
+  rules:
+    - name: configmap-not-referenced-by-workloads
+      type: NameReferenceCheck
+      nameReferenceCheck:
+        sameNamespace: true
+        resources:
+          - apiGroup: apps
+            resource: deployments
+            version: v1
+            nameFields:
+              - spec.template.spec.volumes.configMap.name
+              - spec.template.spec.containers.envFrom.configMapRef.name
+              - spec.template.spec.initContainers.envFrom.configMapRef.name
+              - spec.template.spec.containers.env.valueFrom.configMapKeyRef.name
+              - spec.template.spec.initContainers.env.valueFrom.configMapKeyRef.name
+          - apiGroup: apps
+            resource: daemonsets
+            version: v1
+            nameFields:
+              - spec.template.spec.volumes.configMap.name
+              - spec.template.spec.containers.envFrom.configMapRef.name
+              - spec.template.spec.initContainers.envFrom.configMapRef.name
+              - spec.template.spec.containers.env.valueFrom.configMapKeyRef.name
+              - spec.template.spec.initContainers.env.valueFrom.configMapKeyRef.name
+          - apiGroup: batch
+            resource: cronjobs
+            version: v1
+            nameFields:
+              - spec.jobTemplate.spec.template.spec.volumes.configMap.name
+              - spec.jobTemplate.spec.template.spec.containers.envFrom.configMapRef.name
+              - spec.jobTemplate.spec.template.spec.initContainers.envFrom.configMapRef.name
+              - spec.jobTemplate.spec.template.spec.containers.env.valueFrom.configMapKeyRef.name
+              - spec.jobTemplate.spec.template.spec.initContainers.env.valueFrom.configMapKeyRef.name
+      message: >
+        This ConfigMap cannot be deleted because it is still referenced by one
+        or more Deployments, DaemonSets, or CronJobs. Remove all references to
+        the ConfigMap from those workloads before deleting it.
