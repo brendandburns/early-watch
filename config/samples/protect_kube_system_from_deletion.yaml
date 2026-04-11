@@ -13,7 +13,7 @@ apiVersion: earlywatch.io/v1alpha1
 kind: ChangeValidator
 metadata:
   name: protect-kube-system-from-deletion
-  # No namespace – this is a cluster-scoped guard so it intercepts DELETE
+  # No namespace - this is a cluster-scoped guard so it intercepts DELETE
   # requests against the Namespace resource regardless of which namespace the
   # request targets.
 spec:

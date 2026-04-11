@@ -411,8 +411,25 @@ func evaluateAnnotationCheck(check ewv1alpha1.AnnotationCheck, message string, r
 	}
 
 	// Navigate metadata.annotations.
-	metadata, _ := obj["metadata"].(map[string]interface{})
-	annotations, _ := metadata["annotations"].(map[string]interface{})
+	metadataRaw, ok := obj["metadata"]
+	if !ok || metadataRaw == nil {
+		// Object has no metadata; treat annotations as absent.
+		return true, message, nil
+	}
+	metadata, ok := metadataRaw.(map[string]interface{})
+	if !ok {
+		return false, "", fmt.Errorf("object metadata is not a map (got %T)", metadataRaw)
+	}
+
+	annotationsRaw, ok := metadata["annotations"]
+	if !ok || annotationsRaw == nil {
+		// No annotations present; treat annotation as absent.
+		return true, message, nil
+	}
+	annotations, ok := annotationsRaw.(map[string]interface{})
+	if !ok {
+		return false, "", fmt.Errorf("object metadata.annotations is not a map (got %T)", annotationsRaw)
+	}
 
 	val, present := annotations[check.AnnotationKey]
 	if !present {
