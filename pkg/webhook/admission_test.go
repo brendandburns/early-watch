@@ -1167,3 +1167,264 @@ func TestHandle_NameReferenceCheck_AllowedWhenNoWorkloads(t *testing.T) {
 		t.Errorf("expected ConfigMap DELETE to be allowed when no workloads exist: %v", resp.Result)
 	}
 }
+
+// --- CheckLock rule tests ---
+
+// lockedServiceObj returns a minimal Service object with the lock annotation set.
+func lockedServiceObj(name, namespace string) map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+			"annotations": map[string]interface{}{
+				ewv1alpha1.LockAnnotation: "true",
+			},
+		},
+	}
+}
+
+// makeDeleteRequestNS builds a namespaced DELETE admission.Request placing the
+// object in OldObject (as Kubernetes does for deletes).
+func makeDeleteRequestNS(group, resource, namespace, name string, obj interface{}) admission.Request {
+	var rawObj []byte
+	if obj != nil {
+		var err error
+		rawObj, err = json.Marshal(obj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Delete,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawObj},
+		},
+	}
+}
+
+// TestEvaluateCheckLock_AllowedWhenAnnotationEmpty verifies that an empty lock
+// annotation value is not treated as a lock.
+func TestEvaluateCheckLock_AllowedWhenAnnotationEmpty(t *testing.T) {
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+			"annotations": map[string]interface{}{
+				ewv1alpha1.LockAnnotation: "",
+			},
+		},
+	}
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+
+	violated, _, err := evaluateCheckLock("resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated when lock annotation value is empty")
+	}
+}
+
+// TestEvaluateCheckLock_DeniedWhenAnnotationPresent verifies that a DELETE
+// request is denied when the object carries the lock annotation.
+func TestEvaluateCheckLock_DeniedWhenAnnotationPresent(t *testing.T) {
+	obj := lockedServiceObj("my-svc", "default")
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+
+	violated, msg, err := evaluateCheckLock("resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected CheckLock to be violated when lock annotation is present")
+	}
+	if msg != "resource is locked" {
+		t.Errorf("unexpected message: %q", msg)
+	}
+}
+
+// TestEvaluateCheckLock_AllowedWhenAnnotationAbsent verifies that a DELETE
+// request is allowed when the object does not carry the lock annotation.
+func TestEvaluateCheckLock_AllowedWhenAnnotationAbsent(t *testing.T) {
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+
+	violated, _, err := evaluateCheckLock("resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated when lock annotation is absent")
+	}
+}
+
+// TestEvaluateCheckLock_AllowedForNonDeleteOperation verifies that non-DELETE
+// operations are never blocked by the CheckLock rule.
+func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
+	obj := lockedServiceObj("my-svc", "default")
+	raw, _ := json.Marshal(obj)
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			Object:    runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock("resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated for a non-DELETE operation")
+	}
+}
+
+// TestEvaluateCheckLock_AllowedWhenNoObjectData verifies that a DELETE with no
+// object data does not error and is treated as not locked.
+func TestEvaluateCheckLock_AllowedWhenNoObjectData(t *testing.T) {
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", nil)
+
+	violated, _, err := evaluateCheckLock("resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated when no object data is present")
+	}
+}
+
+// TestEvaluateRule_CheckLock_Violated verifies that evaluateRule correctly
+// routes CheckLock and returns a violation when the lock annotation is set.
+func TestEvaluateRule_CheckLock_Violated(t *testing.T) {
+	h := &AdmissionHandler{}
+	rule := ewv1alpha1.GuardRule{
+		Name:    "check-lock",
+		Type:    ewv1alpha1.RuleTypeCheckLock,
+		Message: "object is locked",
+	}
+	obj := lockedServiceObj("my-svc", "default")
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+
+	violated, msg, err := h.evaluateRule(context.Background(), rule, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected rule to be violated")
+	}
+	if msg != "object is locked" {
+		t.Errorf("unexpected message: %q", msg)
+	}
+}
+
+// TestEvaluateRule_CheckLock_NotViolated verifies that evaluateRule returns no
+// violation when the lock annotation is absent.
+func TestEvaluateRule_CheckLock_NotViolated(t *testing.T) {
+	h := &AdmissionHandler{}
+	rule := ewv1alpha1.GuardRule{
+		Name:    "check-lock",
+		Type:    ewv1alpha1.RuleTypeCheckLock,
+		Message: "object is locked",
+	}
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+	}
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+
+	violated, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected rule NOT to be violated when lock annotation is absent")
+	}
+}
+
+// TestHandle_CheckLock_DeniedWhenLocked verifies the full admission pipeline
+// rejects a DELETE when a CheckLock guard is registered and the object is locked.
+func TestHandle_CheckLock_DeniedWhenLocked(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "check-lock",
+					Type:    ewv1alpha1.RuleTypeCheckLock,
+					Message: "service is locked and cannot be deleted",
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	obj := lockedServiceObj("my-svc", "default")
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected DELETE to be denied because the service carries the lock annotation")
+	}
+}
+
+// TestHandle_CheckLock_AllowedWhenNotLocked verifies the full admission pipeline
+// allows DELETE when no lock annotation is present.
+func TestHandle_CheckLock_AllowedWhenNotLocked(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "check-lock",
+					Type:    ewv1alpha1.RuleTypeCheckLock,
+					Message: "service is locked and cannot be deleted",
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+	}
+	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected DELETE to be allowed when no lock annotation is set: %v", resp.Result)
+	}
+}
