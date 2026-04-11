@@ -23,11 +23,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Create kind cluster
-        uses: helm/kind-action@v1
-
       - name: Install setup-envtest
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.17.3
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
       - name: Run e2e tests
         run: |
