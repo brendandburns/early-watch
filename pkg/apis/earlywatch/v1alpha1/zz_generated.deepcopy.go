@@ -128,6 +128,11 @@ func (in *ChangeValidatorStatus) DeepCopy() *ChangeValidatorStatus {
 // same type that is provided as a pointer.
 func (in *SubjectResource) DeepCopyInto(out *SubjectResource) {
 	*out = *in
+	if in.Names != nil {
+		in, out := &in.Names, &out.Names
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.NamespaceSelector != nil {
 		in, out := &in.NamespaceSelector, &out.NamespaceSelector
 		*out = new(v1.LabelSelector)

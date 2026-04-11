@@ -524,6 +524,240 @@ func TestHandle_ExistingResourcesAllowed(t *testing.T) {
 	}
 }
 
+// makeDeleteRequest builds an admission.Request for a DELETE operation on a
+// cluster-scoped resource (e.g. a Namespace).  The object being deleted is
+// placed in OldObject because Object is nil for DELETE requests.
+func makeDeleteRequest(group, resource, name string, obj interface{}) admission.Request {
+	var rawObj []byte
+	if obj != nil {
+		var err error
+		rawObj, err = json.Marshal(obj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Delete,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			// Namespace is empty for cluster-scoped resources.
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawObj},
+		},
+	}
+}
+
+// namespaceObj returns a minimal Namespace object suitable for serialisation.
+func namespaceObj(name string) map[string]interface{} {
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata":   map[string]interface{}{"name": name},
+	}
+}
+
+// --- namespace deletion tests ---
+
+// newNamespaceDeletionGuard builds a ChangeValidator that prevents deletion of
+// namespaces while they still contain pods.  When names is non-empty the guard
+// is restricted to only those named namespaces; when empty it applies to all.
+func newNamespaceDeletionGuard(names []string) *ewv1alpha1.ChangeValidator {
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "prevent-nonempty-ns-delete"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "namespaces",
+				Names:    names,
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "namespace-must-be-empty",
+					Type:    ewv1alpha1.RuleTypeExistingResources,
+					Message: "namespace cannot be deleted because it still contains pods",
+					ExistingResources: &ewv1alpha1.ExistingResourcesCheck{
+						APIGroup: "",
+						Resource: "pods",
+						// SameNamespace defaults to true; for namespace deletion
+						// the handler will use req.Name as the namespace scope.
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestHandle_NamespaceDeletion_DeniedWhenNonEmpty verifies that deleting a
+// non-empty namespace (one that still contains pods) is denied.
+func TestHandle_NamespaceDeletion_DeniedWhenNonEmpty(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "running-pod",
+			Namespace: "my-ns",
+		},
+	}
+	guard := newNamespaceDeletionGuard(nil) // applies to all namespaces
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{
+		Client:        fakeClient,
+		DynamicClient: fakeDynamic,
+	}
+
+	req := makeDeleteRequest("", "namespaces", "my-ns", namespaceObj("my-ns"))
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected namespace DELETE to be denied because the namespace still contains pods")
+	}
+}
+
+// TestHandle_NamespaceDeletion_AllowedWhenEmpty verifies that deleting an
+// empty namespace (no pods) is allowed.
+func TestHandle_NamespaceDeletion_AllowedWhenEmpty(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	guard := newNamespaceDeletionGuard(nil) // applies to all namespaces
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no pods
+
+	h := &AdmissionHandler{
+		Client:        fakeClient,
+		DynamicClient: fakeDynamic,
+	}
+
+	req := makeDeleteRequest("", "namespaces", "my-ns", namespaceObj("my-ns"))
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected namespace DELETE to be allowed when namespace is empty: %v", resp.Result)
+	}
+}
+
+// TestHandle_NamespaceDeletion_SpecificNames_DeniesListedNamespace verifies
+// that a guard scoped to specific namespace names denies deletion of those
+// namespaces when they are non-empty.
+func TestHandle_NamespaceDeletion_SpecificNames_DeniesListedNamespace(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "running-pod",
+			Namespace: "protected-ns",
+		},
+	}
+	guard := newNamespaceDeletionGuard([]string{"protected-ns", "also-protected"})
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{
+		Client:        fakeClient,
+		DynamicClient: fakeDynamic,
+	}
+
+	req := makeDeleteRequest("", "namespaces", "protected-ns", namespaceObj("protected-ns"))
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected DELETE of listed namespace to be denied because it still contains pods")
+	}
+}
+
+// TestHandle_NamespaceDeletion_SpecificNames_AllowsUnlistedNamespace verifies
+// that a guard scoped to specific namespace names does NOT block deletion of
+// namespaces that are not in its Names list.
+func TestHandle_NamespaceDeletion_SpecificNames_AllowsUnlistedNamespace(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "running-pod",
+			Namespace: "other-ns",
+		},
+	}
+	// Guard only protects "protected-ns", not "other-ns".
+	guard := newNamespaceDeletionGuard([]string{"protected-ns"})
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{
+		Client:        fakeClient,
+		DynamicClient: fakeDynamic,
+	}
+
+	req := makeDeleteRequest("", "namespaces", "other-ns", namespaceObj("other-ns"))
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected DELETE of unlisted namespace to be allowed: %v", resp.Result)
+	}
+}
+
+// TestAppliesToRequest_NamesFilter_Match verifies that a guard with a Names
+// list applies when the request name is in the list.
+func TestAppliesToRequest_NamesFilter_Match(t *testing.T) {
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "namespaces",
+				Names:    []string{"prod", "staging"},
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		},
+	}
+	req := makeDeleteRequest("", "namespaces", "prod", nil)
+	if !appliesToRequest(guard, req) {
+		t.Error("expected guard to apply when request name is in Names list")
+	}
+}
+
+// TestAppliesToRequest_NamesFilter_NoMatch verifies that a guard with a Names
+// list does NOT apply when the request name is not in the list.
+func TestAppliesToRequest_NamesFilter_NoMatch(t *testing.T) {
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "namespaces",
+				Names:    []string{"prod", "staging"},
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		},
+	}
+	req := makeDeleteRequest("", "namespaces", "dev", nil)
+	if appliesToRequest(guard, req) {
+		t.Error("expected guard NOT to apply when request name is not in Names list")
+	}
+}
+
+// TestAppliesToRequest_NamesFilter_EmptyMatchesAll verifies that an empty
+// Names list (omitted) means the guard applies to all resource names.
+func TestAppliesToRequest_NamesFilter_EmptyMatchesAll(t *testing.T) {
+	guard := &ewv1alpha1.ChangeValidator{
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "namespaces",
+				// Names intentionally omitted – should match everything.
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		},
+	}
+	req := makeDeleteRequest("", "namespaces", "any-namespace", nil)
+	if !appliesToRequest(guard, req) {
+		t.Error("expected guard to apply to all namespaces when Names list is empty")
+	}
+}
+
 // labelsFromMap is a helper that converts a plain map to a labels.Set.
 func labelsFromMap(m map[string]string) interface {
 	Has(label string) bool
