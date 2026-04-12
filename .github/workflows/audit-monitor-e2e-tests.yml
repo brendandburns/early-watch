@@ -1,0 +1,49 @@
+name: Audit Monitor E2E Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pkg/auditmonitor/**'
+      - 'pkg/apis/earlywatch/v1alpha1/**'
+      - 'cmd/audit-monitor/**'
+      - 'test/e2e/auditmonitor/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/audit-monitor-e2e-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pkg/auditmonitor/**'
+      - 'pkg/apis/earlywatch/v1alpha1/**'
+      - 'cmd/audit-monitor/**'
+      - 'test/e2e/auditmonitor/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/audit-monitor-e2e-tests.yml'
+
+jobs:
+  audit-monitor-e2e:
+    name: Run audit monitor e2e tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install setup-envtest
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+
+      - name: Run audit monitor e2e tests
+        run: |
+          KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
+          export KUBEBUILDER_ASSETS
+          go test -tags=e2e ./test/e2e/auditmonitor/... -v -count=1

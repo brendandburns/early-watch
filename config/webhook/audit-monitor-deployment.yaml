@@ -1,0 +1,89 @@
+---
+# Deployment for the EarlyWatch audit monitor.
+#
+# The audit monitor receives Kubernetes audit log events from the API server
+# and records ManualTouchEvent custom resources for matching kubectl operations.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: early-watch-audit-monitor
+  namespace: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: audit-monitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: early-watch
+      app.kubernetes.io/component: audit-monitor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: early-watch
+        app.kubernetes.io/component: audit-monitor
+    spec:
+      serviceAccountName: early-watch-audit-monitor
+      containers:
+        - name: audit-monitor
+          image: early-watch-audit-monitor:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --listen-address=:8090
+            - --event-namespace=early-watch-system
+          ports:
+            - name: audit
+              containerPort: 8090
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+---
+# Service for the EarlyWatch audit monitor.
+# The Kubernetes API server's audit webhook backend will connect to this
+# service at port 8090 on the /audit path.
+apiVersion: v1
+kind: Service
+metadata:
+  name: early-watch-audit-monitor
+  namespace: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: audit-monitor
+spec:
+  selector:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: audit-monitor
+  ports:
+    - name: audit
+      port: 8090
+      targetPort: audit
+      protocol: TCP

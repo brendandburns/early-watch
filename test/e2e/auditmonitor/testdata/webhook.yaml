@@ -1,0 +1,43 @@
+# ValidatingWebhookConfiguration used by the audit-monitor envtest-based e2e
+# tests.  envtest replaces the service reference with a URL pointing to the
+# local test webhook server and injects the generated CA bundle.
+#
+# This is identical to the webhook config used by the admission-webhook e2e
+# tests; it registers the /validate path on all namespaced resources so that
+# ManualTouchCheck rules are evaluated during the tests.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: early-watch-validating-webhook-auditmonitor-e2e
+webhooks:
+  - name: validate.earlywatch.io
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: early-watch-system
+        path: /validate
+    rules:
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+        resources:
+          - "*"
+        scope: Namespaced
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    sideEffects: None
+    timeoutSeconds: 10
+    # Exclude kube-system to avoid intercepting internal cluster operations.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system

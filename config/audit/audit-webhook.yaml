@@ -1,0 +1,27 @@
+---
+# Audit Webhook Configuration for EarlyWatch
+#
+# This kubeconfig-format file tells the Kubernetes API server where to forward
+# audit events.  Pass it to the API server with:
+#   --audit-webhook-config-file=/etc/kubernetes/audit/audit-webhook.yaml
+#
+# The "server" URL must point to the EarlyWatch audit-monitor service.
+# Adjust the host and path to match your deployment.
+apiVersion: v1
+kind: Config
+clusters:
+  - name: earlywatch-audit-monitor
+    cluster:
+      # Replace with the actual in-cluster or external URL of the audit monitor.
+      # Configure the audit monitor with TLS and use its HTTPS endpoint.
+      # When deployed inside the same cluster, use the service DNS name:
+      server: https://early-watch-audit-monitor.early-watch-system.svc.cluster.local:8090/audit
+      # Pin trust to the CA that issued the audit monitor's serving certificate.
+      certificate-authority: /etc/kubernetes/audit/ca.crt
+contexts:
+  - name: default
+    context:
+      cluster: earlywatch-audit-monitor
+      user: ""
+current-context: default
+users: []

@@ -1,0 +1,178 @@
+---
+# CRD: ManualTouchMonitor
+# Declares which Kubernetes resources and operations are monitored for manual
+# (kubectl) touches.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: manualtouchmonitors.earlywatch.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+spec:
+  group: earlywatch.io
+  names:
+    kind: ManualTouchMonitor
+    listKind: ManualTouchMonitorList
+    plural: manualtouchmonitors
+    singular: manualtouchmonitor
+    shortNames:
+      - mtm
+    categories:
+      - earlywatch
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Touches
+          type: integer
+          jsonPath: .status.touchesDetected
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >
+            ManualTouchMonitor declares which Kubernetes resources and operations
+            the EarlyWatch audit monitor should watch for manual (kubectl)
+            touches.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: ManualTouchMonitorSpec defines the monitoring configuration.
+              type: object
+              required:
+                - subjects
+                - operations
+              properties:
+                subjects:
+                  description: >
+                    Subjects is the list of Kubernetes resource types to
+                    monitor.
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required:
+                      - resource
+                    properties:
+                      apiGroup:
+                        description: >
+                          APIGroup is the API group for the resource. Use ""
+                          for core resources.
+                        type: string
+                      resource:
+                        description: >
+                          Resource is the plural resource name, e.g.
+                          "services", "deployments".
+                        type: string
+                      namespaceSelector:
+                        description: >
+                          NamespaceSelector optionally restricts monitoring to
+                          namespaces whose labels match this selector.
+                        type: object
+                        properties:
+                          matchLabels:
+                            type: object
+                            additionalProperties:
+                              type: string
+                          matchExpressions:
+                            type: array
+                            items:
+                              type: object
+                              required:
+                                - key
+                                - operator
+                              properties:
+                                key:
+                                  type: string
+                                operator:
+                                  type: string
+                                values:
+                                  type: array
+                                  items:
+                                    type: string
+                operations:
+                  description: >
+                    Operations is the list of operations to flag as manual
+                    touches. Valid values: DELETE, CREATE, UPDATE.
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum: [DELETE, CREATE, UPDATE]
+                userAgentPatterns:
+                  description: >
+                    UserAgentPatterns is a list of regular expressions that
+                    identify "manual" user agents. Defaults to ["^kubectl/"]
+                    when empty.
+                  type: array
+                  items:
+                    type: string
+                excludeServiceAccounts:
+                  description: >
+                    ExcludeServiceAccounts is a list of Kubernetes
+                    service-account usernames whose operations should never
+                    be flagged as manual touches.
+                  type: array
+                  items:
+                    type: string
+                alerting:
+                  description: >
+                    Alerting configures optional notification sinks.
+                  type: object
+                  properties:
+                    prometheusLabels:
+                      description: >
+                        PrometheusLabels is an optional set of static labels
+                        added to the earlywatch_manual_touch_total counter.
+                      type: object
+                      additionalProperties:
+                        type: string
+            status:
+              description: ManualTouchMonitorStatus defines the observed state.
+              type: object
+              properties:
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                    properties:
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                      reason:
+                        type: string
+                      status:
+                        type: string
+                      type:
+                        type: string
+                observedGeneration:
+                  type: integer
+                  format: int64
+                touchesDetected:
+                  description: >
+                    TouchesDetected is the total number of manual touch events
+                    recorded by this monitor since it was created.
+                  type: integer
+                  format: int64
