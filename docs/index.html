@@ -555,6 +555,7 @@
     <li><a href="#how-it-works">How It Works</a></li>
     <li><a href="#features">Features</a></li>
     <li><a href="#crd">CRD</a></li>
+    <li><a href="#watchctl">watchctl</a></li>
     <li><a href="#getting-started">Getting Started</a></li>
   </ul>
   <a class="nav-cta" href="https://github.com/brendandburns/early-watch" target="_blank" rel="noopener">
@@ -765,6 +766,50 @@ spec:
       message: >
         This Service cannot be deleted because
         matching Pods are still running.</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ─── watchctl CLI ─────────────────────────────────────────────────── -->
+<section class="gettingstarted-section" id="watchctl">
+  <p class="section-label">CLI Tool</p>
+  <h2 class="section-title">watchctl</h2>
+  <p class="section-sub">
+    <code class="code-inline">watchctl</code> is the EarlyWatch command-line tool.
+    Use it to interact with EarlyWatch from your terminal or CI pipeline.
+  </p>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num" style="font-size:.85rem;line-height:1.2">build</div>
+      <div class="step-body">
+        <h4>Build watchctl</h4>
+        <p>Compile the CLI from source using the standard Go toolchain.</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">go build ./cmd/watchctl/...</code></pre>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num" style="font-size:.85rem;line-height:1.2">approve</div>
+      <div class="step-body">
+        <h4>watchctl approve — sign a resource for an ApprovalCheck rule</h4>
+        <p>
+          The <code class="code-inline">approve</code> subcommand signs a Kubernetes resource's
+          canonical path with your RSA private key and writes the resulting signature as an
+          annotation on the resource. The EarlyWatch webhook verifies the annotation before
+          allowing the guarded operation.
+        </p>
+        <pre style="margin-top:.6rem"><code class="language-bash">watchctl approve \
+  --private-key /path/to/private-key.pem \
+  --group "" \
+  --version v1 \
+  --resource configmaps \
+  --namespace default \
+  --name my-config</code></pre>
+        <p style="margin-top:.8rem">
+          Run <code class="code-inline">watchctl approve --help</code> to see all available flags.
+        </p>
+      </div>
     </div>
   </div>
 </section>

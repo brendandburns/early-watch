@@ -101,6 +101,7 @@ The optional `namespaceSelector` restricts a guard to namespaces whose labels ma
 | `ExpressionCheck` | Evaluates a simple expression against the admission request (e.g. `operation == 'DELETE'`). |
 | `NameReferenceCheck` | Denies the request when the subject resource is referenced by name in other cluster resources (e.g. a ConfigMap referenced by a Deployment volume). |
 | `CheckLock` | Denies a DELETE request when the subject resource carries the `earlywatch.io/lock` annotation. |
+| `ApprovalCheck` | Denies the operation unless the resource carries a valid RSA-PSS SHA-256 approval signature in an annotation. Use `watchctl approve` to create the signature. |
 
 Full CRD schema: [`config/crd/bases/earlywatch.io_changevalidators.yaml`](config/crd/bases/earlywatch.io_changevalidators.yaml)
 
@@ -163,9 +164,15 @@ kubectl annotate deployment my-app earlywatch.io/lock-
 ```
 early-watch/
 ├── cmd/
+│   ├── watchctl/
+│   │   ├── main.go                   # watchctl CLI entry point (cobra root command)
+│   │   └── approve.go                # watchctl approve subcommand
 │   └── webhook/
 │       └── main.go                   # Admission webhook server entry point
 ├── pkg/
+│   ├── approve/
+│   │   ├── approve.go                # Core approve logic (sign + annotate)
+│   │   └── approve_test.go           # Unit tests for approve logic
 │   ├── apis/
 │   │   └── earlywatch/
 │   │       └── v1alpha1/
@@ -213,7 +220,11 @@ early-watch/
 ### Build
 
 ```bash
+# Admission webhook server
 go build ./cmd/webhook/...
+
+# watchctl CLI
+go build ./cmd/watchctl/...
 ```
 
 ### Run Tests
@@ -221,6 +232,51 @@ go build ./cmd/webhook/...
 ```bash
 go test ./...
 ```
+
+---
+
+## watchctl — The EarlyWatch CLI
+
+`watchctl` is the command-line companion to the EarlyWatch webhook.
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `watchctl approve` | Sign a Kubernetes resource's canonical path with an RSA private key and write the signature as an approval annotation. |
+
+### `watchctl approve`
+
+The `approve` subcommand is used together with an `ApprovalCheck` rule.  It signs the resource's canonical path with your RSA private key and patches the signature as an annotation onto the resource.  The webhook then verifies the signature before allowing the operation.
+
+```bash
+watchctl approve \
+  --private-key /path/to/private-key.pem \
+  --group "" \
+  --version v1 \
+  --resource configmaps \
+  --namespace default \
+  --name my-config
+```
+
+**Required flags**
+
+| Flag | Description |
+|------|-------------|
+| `--private-key` | Path to a PEM-encoded RSA private key (PKCS#1 or PKCS#8). |
+| `--resource` | Plural resource name, e.g. `configmaps`, `deployments`. |
+| `--name` | Name of the resource to approve. |
+
+**Optional flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--group` | `""` | API group (empty string for core resources). |
+| `--version` | `v1` | API version. |
+| `--namespace` | `""` | Namespace (leave empty for cluster-scoped resources). |
+| `--annotation-key` | `earlywatch.io/approved` | Annotation key to write the signature to. |
+| `--kubeconfig` | `""` | Path to kubeconfig; falls back to in-cluster config. |
+
 
 ### Deploy to a Cluster
 
