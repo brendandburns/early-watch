@@ -64,7 +64,7 @@ func init() {
 	_ = approveCmd.MarkFlagRequired("name")
 }
 
-func runApprove(cmd *cobra.Command, args []string) error {
+func runApprove(_ *cobra.Command, args []string) error {
 	opts := ewapprove.Options{
 		PrivateKeyPath: approveFlags.privateKeyPath,
 		Kubeconfig:     approveFlags.kubeconfig,

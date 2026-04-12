@@ -147,7 +147,7 @@ func applyManifest(
 
 		jsonData, err := json.Marshal(obj.Object)
 		if err != nil {
-			return fmt.Errorf("marshalling resource %s %q: %w", gvk.Kind, obj.GetName(), err)
+			return fmt.Errorf("marshaling resource %s %q: %w", gvk.Kind, obj.GetName(), err)
 		}
 
 		var resourceClient dynamic.ResourceInterface

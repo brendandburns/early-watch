@@ -51,9 +51,13 @@ type SubjectResource struct {
 type OperationType string
 
 const (
-	OperationCreate  OperationType = "CREATE"
-	OperationUpdate  OperationType = "UPDATE"
-	OperationDelete  OperationType = "DELETE"
+	// OperationCreate represents a CREATE admission operation.
+	OperationCreate OperationType = "CREATE"
+	// OperationUpdate represents an UPDATE admission operation.
+	OperationUpdate OperationType = "UPDATE"
+	// OperationDelete represents a DELETE admission operation.
+	OperationDelete OperationType = "DELETE"
+	// OperationConnect represents a CONNECT admission operation.
 	OperationConnect OperationType = "CONNECT"
 )
 

@@ -36,7 +36,7 @@ func generateTestKeyPKCS8(t *testing.T) (*rsa.PrivateKey, []byte) {
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(privKey)
 	if err != nil {
-		t.Fatalf("marshalling PKCS#8 key: %v", err)
+		t.Fatalf("marshaling PKCS#8 key: %v", err)
 	}
 	pemBytes := pem.EncodeToMemory(&pem.Block{
 		Type:  "PRIVATE KEY",

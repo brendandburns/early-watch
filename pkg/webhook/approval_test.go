@@ -11,11 +11,12 @@ import (
 	"encoding/pem"
 	"testing"
 
-	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 )
 
 // generateTestKeyPair generates a 2048-bit RSA key pair for testing.
@@ -28,7 +29,7 @@ func generateTestKeyPair(t *testing.T) (*rsa.PrivateKey, string) {
 
 	pubDER, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
 	if err != nil {
-		t.Fatalf("marshalling public key: %v", err)
+		t.Fatalf("marshaling public key: %v", err)
 	}
 	pubPEM := string(pem.EncodeToMemory(&pem.Block{
 		Type:  "PUBLIC KEY",
