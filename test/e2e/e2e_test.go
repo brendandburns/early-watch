@@ -39,6 +39,9 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -47,6 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
+	ewinstall "github.com/brendandburns/early-watch/pkg/install"
 	ewwebhook "github.com/brendandburns/early-watch/pkg/webhook"
 )
 
@@ -80,8 +84,6 @@ func TestMain(m *testing.M) {
 	mustAddToScheme(ewv1alpha1.AddToScheme, scheme)
 
 	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
-		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			Paths: []string{filepath.Join("testdata")},
 		},
@@ -90,6 +92,21 @@ func TestMain(m *testing.M) {
 	cfg, err := env.Start()
 	if err != nil {
 		panic("envtest.Start: " + err.Error())
+	}
+
+	// Write the envtest REST config to a temporary kubeconfig file so that
+	// watchctl install can reach the local API server.
+	kubeconfigPath, err := writeKubeconfig(cfg)
+	if err != nil {
+		panic("writeKubeconfig: " + err.Error())
+	}
+	defer os.Remove(kubeconfigPath)
+
+	// Use watchctl install to apply the EarlyWatch CRD, RBAC, and webhook
+	// manifests onto the envtest cluster. This mirrors what a real installation
+	// looks like and validates the install path end-to-end.
+	if err := ewinstall.Run(ewinstall.Options{Kubeconfig: kubeconfigPath}); err != nil {
+		panic("ewinstall.Run: " + err.Error())
 	}
 
 	// Build a direct (non-caching) client for test setup, teardown, and as the
@@ -146,6 +163,42 @@ func mustAddToScheme(fn func(*k8sruntime.Scheme) error, s *k8sruntime.Scheme) {
 	if err := fn(s); err != nil {
 		panic(err)
 	}
+}
+
+// writeKubeconfig writes a kubeconfig file for the given REST config to a
+// temporary file and returns its path.  The caller is responsible for removing
+// the file when it is no longer needed.
+func writeKubeconfig(cfg *rest.Config) (string, error) {
+	kc := clientcmdapi.NewConfig()
+	kc.Clusters["envtest"] = &clientcmdapi.Cluster{
+		Server:                   cfg.Host,
+		CertificateAuthorityData: cfg.CAData,
+	}
+	kc.AuthInfos["envtest"] = &clientcmdapi.AuthInfo{
+		ClientCertificateData: cfg.CertData,
+		ClientKeyData:         cfg.KeyData,
+	}
+	kc.Contexts["envtest"] = &clientcmdapi.Context{
+		Cluster:  "envtest",
+		AuthInfo: "envtest",
+	}
+	kc.CurrentContext = "envtest"
+
+	data, err := clientcmd.Write(*kc)
+	if err != nil {
+		return "", fmt.Errorf("marshalling kubeconfig: %w", err)
+	}
+
+	f, err := os.CreateTemp("", "envtest-kubeconfig-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("creating temp kubeconfig file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(data); err != nil {
+		return "", fmt.Errorf("writing kubeconfig: %w", err)
+	}
+	return f.Name(), nil
 }
 
 // waitForWebhook polls until a TLS connection to host:port succeeds, or the

@@ -26,6 +26,9 @@ jobs:
       - name: Install setup-envtest
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
+      - name: Build watchctl
+        run: go build -o /usr/local/bin/watchctl ./cmd/watchctl
+
       - name: Run e2e tests
         run: |
           KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
