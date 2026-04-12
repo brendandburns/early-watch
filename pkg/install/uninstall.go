@@ -19,6 +19,8 @@ import (
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/restmapper"
+
+	internalapply "github.com/brendandburns/early-watch/pkg/internal/apply"
 )
 
 // UninstallOptions holds the parameters for an uninstall operation.
@@ -42,7 +44,7 @@ func Uninstall(opts UninstallOptions) error {
 		opts.Namespace = defaultNamespace
 	}
 
-	cfg, err := buildRESTConfig(opts.Kubeconfig)
+	cfg, err := internalapply.BuildRESTConfig(opts.Kubeconfig)
 	if err != nil {
 		return fmt.Errorf("building REST config: %w", err)
 	}
@@ -119,7 +121,7 @@ func Uninstall(opts UninstallOptions) error {
 					fmt.Printf("Skipping %s %q (resource type not available in cluster)\n", gvk.Kind, obj.GetName())
 					continue
 				}
-				return fmt.Errorf("resolving REST mapping for %s %q: %w", gvk.Kind, resourceDisplayName(obj), err)
+				return fmt.Errorf("resolving REST mapping for %s %q: %w", gvk.Kind, internalapply.ResourceDisplayName(obj), err)
 			}
 
 			resources = append(resources, resourceRef{obj: obj, mapping: mapping})
@@ -145,13 +147,13 @@ func Uninstall(opts UninstallOptions) error {
 
 		if err := resourceClient.Delete(ctx, obj.GetName(), metav1.DeleteOptions{}); err != nil {
 			if kerrors.IsNotFound(err) {
-				fmt.Printf("Skipped %s %q (not found)\n", obj.GetKind(), resourceDisplayName(obj))
+				fmt.Printf("Skipped %s %q (not found)\n", obj.GetKind(), internalapply.ResourceDisplayName(obj))
 				continue
 			}
-			return fmt.Errorf("deleting %s %q: %w", obj.GetKind(), resourceDisplayName(obj), err)
+			return fmt.Errorf("deleting %s %q: %w", obj.GetKind(), internalapply.ResourceDisplayName(obj), err)
 		}
 
-		fmt.Printf("Deleted %s %q\n", obj.GetKind(), resourceDisplayName(obj))
+		fmt.Printf("Deleted %s %q\n", obj.GetKind(), internalapply.ResourceDisplayName(obj))
 	}
 
 	// Delete the namespace last (it was created programmatically by install,
