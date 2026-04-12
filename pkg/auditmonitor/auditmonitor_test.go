@@ -265,7 +265,7 @@ func TestSanitizeName_SpecialChars(t *testing.T) {
 		t.Error("sanitized name should not be empty")
 	}
 	for _, r := range result {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 			t.Errorf("sanitized name contains invalid character: %q", r)
 		}
 	}
@@ -303,7 +303,7 @@ func TestAuditEventHandler_PostKubectlDelete(t *testing.T) {
 	}
 	body, _ := json.Marshal(eventList)
 
-	req := httptest.NewRequest(http.MethodPost, "/audit", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/audit", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -333,7 +333,7 @@ func TestAuditEventHandler_IgnoresGetMethod(t *testing.T) {
 		Recorder: &TouchRecorder{Client: fakeClient, EventNamespace: "early-watch-system"},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/audit", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/audit", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -351,7 +351,7 @@ func TestAuditEventHandler_BadJSON(t *testing.T) {
 		Recorder: &TouchRecorder{Client: fakeClient, EventNamespace: "early-watch-system"},
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/audit", bytes.NewReader([]byte("not-json")))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/audit", bytes.NewReader([]byte("not-json")))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 
@@ -375,7 +375,7 @@ func TestAuditEventHandler_SkipsNonResponseCompleteStage(t *testing.T) {
 	eventList := AuditEventList{Items: []AuditEvent{*event}}
 	body, _ := json.Marshal(eventList)
 
-	req := httptest.NewRequest(http.MethodPost, "/audit", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/audit", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 

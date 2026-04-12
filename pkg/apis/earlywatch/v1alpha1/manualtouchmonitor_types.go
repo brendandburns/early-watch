@@ -59,8 +59,11 @@ type MonitorSubject struct {
 type MonitorOperationType string
 
 const (
+	// MonitorOperationDelete represents a DELETE or DELETECOLLECTION verb.
 	MonitorOperationDelete MonitorOperationType = "DELETE"
+	// MonitorOperationCreate represents a CREATE verb.
 	MonitorOperationCreate MonitorOperationType = "CREATE"
+	// MonitorOperationUpdate represents an UPDATE or PATCH verb.
 	MonitorOperationUpdate MonitorOperationType = "UPDATE"
 )
 
