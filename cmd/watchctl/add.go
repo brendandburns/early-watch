@@ -15,19 +15,19 @@ func init() {
 
 var addCmd = &cobra.Command{
 	Use:   "add <file-or-directory>",
-	Short: "Apply a ChangeValidator from a YAML file or directory",
-	Long: `add applies one or more ChangeValidator manifests to the cluster.
+	Short: "Apply one or more manifests from a YAML file or directory",
+	Long: `add applies one or more manifests to the cluster.
 
 The argument can be a path to a single YAML file or a directory containing
-multiple YAML files.  All resources found in the file(s) are applied using
+multiple YAML files. All resources found in the file(s) are applied using
 Server-Side Apply, making the operation idempotent.
 
 Examples:
 
-  # Apply a single ChangeValidator from a file
+  # Apply all manifests from a file
   watchctl add config/samples/protect_service.yaml
 
-  # Apply all ChangeValidators in a directory
+  # Apply all manifests in a directory
   watchctl add config/samples/`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAdd,

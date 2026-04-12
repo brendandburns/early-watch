@@ -42,7 +42,7 @@ watchctl add config/samples/protect_configmap_from_deletion.yaml
 
 ### `protect_secret_from_deletion.yaml`
 
-Prevents a **Secret** from being deleted while it is referenced by Deployments, DaemonSets, or CronJobs (as a volume, environment variable source, or image pull secret), or used as a TLS certificate by an Ingress resource in the same namespace.  This file contains two `ChangeValidator` objects and both are applied together.
+Prevents a **Secret** from being deleted while it is referenced by Deployments, DaemonSets, or CronJobs (as a volume, environment variable source, or image pull secret), or used as a TLS certificate by an Ingress resource in the same namespace. This file contains two `ChangeValidator` objects and both are applied together.
 
 ```bash
 watchctl add config/samples/protect_secret_from_deletion.yaml
