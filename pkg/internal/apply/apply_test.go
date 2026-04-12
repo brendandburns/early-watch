@@ -192,7 +192,7 @@ func TestApplyManifest_ValidNamespacedResource(t *testing.T) {
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestApplyManifest_NamespaceDefaultsToDefault(t *testing.T) {
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVNoNamespaceYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVNoNamespaceYAML), "test.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestApplyManifest_NamespaceSetOnObjectWhenDefaulted(t *testing.T) {
 		return true, &unstructured.Unstructured{}, nil
 	})
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVNoNamespaceYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVNoNamespaceYAML), "test.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestApplyManifest_ClusterScopedResourceOmitsNamespace(t *testing.T) {
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newClusterScopedMapper(), []byte(validCVYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, newClusterScopedMapper(), []byte(validCVYAML), "test.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -299,7 +299,7 @@ spec:
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(multiDoc), "multi.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(multiDoc), "multi.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestApplyManifest_EmptyDocument(t *testing.T) {
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte("---\n"), "empty.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte("---\n"), "empty.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -330,7 +330,7 @@ metadata:
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(noKind), "nokind.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(noKind), "nokind.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -349,7 +349,7 @@ metadata:
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(noName), "noname.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(noName), "noname.yaml", nil)
 	if err == nil {
 		t.Fatal("expected error for resource missing metadata.name, got nil")
 	}
@@ -368,7 +368,7 @@ metadata:
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(noName), "my-dir/validators.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(noName), "my-dir/validators.yaml", nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -399,7 +399,7 @@ func TestApplyManifest_RESTMapperError(t *testing.T) {
 	fdc := newRecordingDynamic(&records, nil)
 	errMapper := &errorRESTMapper{err: fmt.Errorf("no mapping found")}
 
-	err := ApplyManifest(context.Background(), fdc, errMapper, []byte(validCVYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, errMapper, []byte(validCVYAML), "test.yaml", nil)
 	if err == nil {
 		t.Fatal("expected error from REST mapper, got nil")
 	}
@@ -413,7 +413,7 @@ func TestApplyManifest_PatchError(t *testing.T) {
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, patchErr)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", nil)
 	if err == nil {
 		t.Fatal("expected error from Patch call, got nil")
 	}
@@ -423,7 +423,7 @@ func TestApplyManifest_InvalidYAML(t *testing.T) {
 	var records []patchRecord
 	fdc := newRecordingDynamic(&records, nil)
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(":{invalid yaml"), "bad.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(":{invalid yaml"), "bad.yaml", nil)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML, got nil")
 	}
@@ -446,7 +446,7 @@ func TestApplyManifest_PreApplyCallbackInvoked(t *testing.T) {
 		obj.SetAnnotations(annotations)
 	}
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", preApply)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", preApply)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -483,7 +483,7 @@ spec:
 	var callCount int
 	preApply := func(_ *unstructured.Unstructured) { callCount++ }
 
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(multiDoc), "multi.yaml", preApply)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(multiDoc), "multi.yaml", preApply)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestApplyManifest_NilPreApplyDoesNotPanic(t *testing.T) {
 	fdc := newRecordingDynamic(&records, nil)
 
 	// Must not panic when preApply is nil.
-	err := ApplyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", nil)
+	err := Manifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

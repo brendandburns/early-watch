@@ -22,11 +22,11 @@ import (
 // FieldManager is the field manager name used for Server-Side Apply.
 const FieldManager = "watchctl"
 
-// ApplyManifest splits a potentially multi-document YAML file and applies
+// Manifest splits a potentially multi-document YAML file and applies
 // each document to the cluster using Server-Side Apply. The optional preApply
 // function is called on each decoded object before it is applied; pass nil if
 // no pre-processing is needed.
-func ApplyManifest(
+func Manifest(
 	ctx context.Context,
 	dynClient dynamic.Interface,
 	mapper meta.RESTMapper,

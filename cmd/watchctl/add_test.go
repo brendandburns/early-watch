@@ -151,7 +151,9 @@ func TestRunAdd_WritesErrorToStderr(t *testing.T) {
 	defer func() { addFlags.kubeconfig = "" }()
 	_ = runAdd(addCmd, []string{"/no/such/path/ever"})
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe writer: %v", err)
+	}
 	os.Stderr = origStderr
 
 	var buf bytes.Buffer

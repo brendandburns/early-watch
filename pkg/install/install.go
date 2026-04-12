@@ -35,9 +35,6 @@ const defaultNamespace = "early-watch-system"
 // namespaceGVR is the GroupVersionResource for Namespace objects.
 var namespaceGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
 
-// fieldManager is the field manager name used for Server-Side Apply.
-const fieldManager = "watchctl"
-
 // CreatedByAnnotation is the annotation key written onto every resource
 // applied by "watchctl install". Its value identifies the tool that created
 // the resource, making it easy to list or delete all managed resources later.
@@ -121,7 +118,7 @@ func Run(opts Options) error {
 			data = bytes.ReplaceAll(data, []byte(defaultNamespace), []byte(opts.Namespace))
 		}
 
-		if err := internalapply.ApplyManifest(ctx, dynClient, mapper, data, entry.Name(), func(obj *unstructured.Unstructured) {
+		if err := internalapply.Manifest(ctx, dynClient, mapper, data, entry.Name(), func(obj *unstructured.Unstructured) {
 			injectAnnotation(obj, CreatedByAnnotation, managedByValue)
 		}); err != nil {
 			return err

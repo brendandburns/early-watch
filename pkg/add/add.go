@@ -58,7 +58,7 @@ func Run(opts Options) error {
 		if err != nil {
 			return fmt.Errorf("reading file %q: %w", file, err)
 		}
-		if err := internalapply.ApplyManifest(ctx, dynClient, mapper, data, file, nil); err != nil {
+		if err := internalapply.Manifest(ctx, dynClient, mapper, data, file, nil); err != nil {
 			return err
 		}
 	}
