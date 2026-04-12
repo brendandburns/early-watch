@@ -63,7 +63,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;AnnotationCheck;CheckLock
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;AnnotationCheck;CheckLock;ManualTouchCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -92,6 +92,14 @@ type GuardRule struct {
 	// Required when Type is AnnotationCheck.
 	// +optional
 	AnnotationCheck *AnnotationCheck `json:"annotationCheck,omitempty"`
+
+	// ManualTouchCheck denies the request when a recent manual touch
+	// (kubectl operation) has been recorded for the same resource within
+	// a configurable look-back window.  Use this to prevent automation
+	// from overwriting an operator's manual change.
+	// Required when Type is ManualTouchCheck.
+	// +optional
+	ManualTouchCheck *ManualTouchCheck `json:"manualTouchCheck,omitempty"`
 
 	// Message is the human-readable denial message returned to the user
 	// when this rule is violated.
@@ -146,6 +154,11 @@ const (
 	// RuleTypeCheckLock denies a DELETE request when the subject resource
 	// carries the earlywatch.io/lock annotation.
 	RuleTypeCheckLock RuleType = "CheckLock"
+
+	// RuleTypeManualTouchCheck denies the request when a recent manual
+	// touch (kubectl DELETE/CREATE/UPDATE) has been recorded for the same
+	// resource within a configurable look-back window.
+	RuleTypeManualTouchCheck RuleType = "ManualTouchCheck"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent
@@ -205,8 +218,7 @@ type NameReferenceCheck struct {
 	SameNamespace *bool `json:"sameNamespace,omitempty"`
 }
 
-// NameReferenceResource describes a single resource type to scan for
-// references to the subject resource by name.
+// NameReferenceResource describes a single resource type to scan for// references to the subject resource by name.
 type NameReferenceResource struct {
 	// APIGroup is the API group of the resource type to scan.
 	// Use "" for core resources and "apps" for Deployments/DaemonSets.
@@ -270,4 +282,20 @@ type ChangeValidatorList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ChangeValidator `json:"items"`
+}
+
+// ManualTouchCheck denies the request when a ManualTouchEvent has been
+// recorded for the same resource within the configured look-back window.
+// This prevents automated pipelines from overwriting manual operator changes.
+type ManualTouchCheck struct {
+	// WindowDuration is the look-back period used to search for recent
+	// manual touch events.  The value must be a Go duration string, e.g.
+	// "30m", "2h", or "24h".  Defaults to "1h" when omitted.
+	// +optional
+	WindowDuration string `json:"windowDuration,omitempty"`
+
+	// EventNamespace is the namespace where ManualTouchEvent resources are
+	// stored.  Defaults to "early-watch-system" when omitted.
+	// +optional
+	EventNamespace string `json:"eventNamespace,omitempty"`
 }

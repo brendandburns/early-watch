@@ -1,0 +1,132 @@
+---
+# CRD: ManualTouchEvent
+# Records a single detected manual touch (kubectl DELETE/CREATE/UPDATE).
+# Operators can query these with `kubectl get manualtouchevents`.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: manualtouchevents.earlywatch.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+spec:
+  group: earlywatch.io
+  names:
+    kind: ManualTouchEvent
+    listKind: ManualTouchEventList
+    plural: manualtouchevents
+    singular: manualtouchevent
+    shortNames:
+      - mte
+    categories:
+      - earlywatch
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: User
+          type: string
+          jsonPath: .spec.user
+        - name: Operation
+          type: string
+          jsonPath: .spec.operation
+        - name: Resource
+          type: string
+          jsonPath: .spec.resource
+        - name: ResourceName
+          type: string
+          jsonPath: .spec.resourceName
+        - name: Namespace
+          type: string
+          jsonPath: .spec.resourceNamespace
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          description: >
+            ManualTouchEvent records a single manual touch detected by the
+            EarlyWatch audit monitor.
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              description: ManualTouchEventSpec holds the recorded event details.
+              type: object
+              required:
+                - timestamp
+                - user
+                - userAgent
+                - operation
+                - resource
+                - resourceName
+                - auditID
+                - monitorName
+                - monitorNamespace
+              properties:
+                timestamp:
+                  description: >
+                    Timestamp is when the operation was received by the API
+                    server.
+                  type: string
+                  format: date-time
+                user:
+                  description: >
+                    User is the Kubernetes username that performed the
+                    operation.
+                  type: string
+                userAgent:
+                  description: >
+                    UserAgent is the raw User-Agent string sent with the
+                    request, e.g. "kubectl/v1.29.0 (linux/amd64)".
+                  type: string
+                operation:
+                  description: >
+                    Operation is the HTTP verb of the operation: DELETE,
+                    CREATE, or UPDATE.
+                  type: string
+                apiGroup:
+                  description: >
+                    APIGroup is the API group of the touched resource (empty
+                    for core resources).
+                  type: string
+                resource:
+                  description: >
+                    Resource is the plural resource type, e.g. "services".
+                  type: string
+                resourceName:
+                  description: >
+                    ResourceName is the name of the specific resource that
+                    was touched.
+                  type: string
+                resourceNamespace:
+                  description: >
+                    ResourceNamespace is the namespace of the touched resource.
+                    Empty for cluster-scoped resources.
+                  type: string
+                sourceIP:
+                  description: >
+                    SourceIP is the originating IP address recorded in the
+                    audit event.
+                  type: string
+                auditID:
+                  description: >
+                    AuditID is the Kubernetes audit event ID for
+                    cross-referencing with the raw audit log.
+                  type: string
+                monitorName:
+                  description: >
+                    MonitorName is the name of the ManualTouchMonitor that
+                    generated this event.
+                  type: string
+                monitorNamespace:
+                  description: >
+                    MonitorNamespace is the namespace of the ManualTouchMonitor
+                    that generated this event.
+                  type: string

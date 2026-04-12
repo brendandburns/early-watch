@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -1715,4 +1716,209 @@ func TestHandle_CheckLock_AllowedWhenNotLocked(t *testing.T) {
 		t.Errorf("expected DELETE to be allowed when no lock annotation is set: %v", resp.Result)
 	}
 }
+
+// ---- ManualTouchCheck tests ----
+
+// TestHandle_ManualTouchCheck_DeniedWhenRecentEventExists verifies that an
+// automated pipeline change is denied when a recent ManualTouchEvent exists
+// for the same resource.
+func TestHandle_ManualTouchCheck_DeniedWhenRecentEventExists(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	// Recent manual touch event for the service.
+	mte := &ewv1alpha1.ManualTouchEvent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mte-001",
+			Namespace: "early-watch-system",
+			Labels: map[string]string{
+				"earlywatch.io/resource":           "services",
+				"earlywatch.io/resource-namespace": "default",
+				"earlywatch.io/resource-name":      "my-svc",
+				"earlywatch.io/api-group":          "",
+				"earlywatch.io/operation":          "DELETE",
+			},
+		},
+		Spec: ewv1alpha1.ManualTouchEventSpec{
+			Timestamp:         metav1.NewTime(time.Now().Add(-5 * time.Minute)), // 5 min ago
+			User:              "kubernetes-admin",
+			UserAgent:         "kubectl/v1.29.0",
+			Operation:         "DELETE",
+			Resource:          "services",
+			ResourceName:      "my-svc",
+			ResourceNamespace: "default",
+			AuditID:           "audit-001",
+			MonitorName:       "my-monitor",
+			MonitorNamespace:  "default",
+		},
+	}
+
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "guard-manual-touch", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-recent-manual-touch",
+					Type:    ewv1alpha1.RuleTypeManualTouchCheck,
+					Message: "a recent manual touch was detected; pipeline change denied",
+					ManualTouchCheck: &ewv1alpha1.ManualTouchCheck{
+						WindowDuration: "1h",
+						EventNamespace: "early-watch-system",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(guard, mte).
+		Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Update, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because a recent ManualTouchEvent exists")
+	}
+}
+
+// TestHandle_ManualTouchCheck_AllowedWhenNoRecentEvent verifies that an
+// automated change is allowed when no recent ManualTouchEvent exists.
+func TestHandle_ManualTouchCheck_AllowedWhenNoRecentEvent(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "guard-manual-touch", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-recent-manual-touch",
+					Type:    ewv1alpha1.RuleTypeManualTouchCheck,
+					Message: "a recent manual touch was detected; pipeline change denied",
+					ManualTouchCheck: &ewv1alpha1.ManualTouchCheck{
+						WindowDuration: "1h",
+						EventNamespace: "early-watch-system",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(guard).
+		Build() // no ManualTouchEvents
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Update, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when no ManualTouchEvent exists: %v", resp.Result)
+	}
+}
+
+// TestHandle_ManualTouchCheck_AllowedWhenEventIsOutsideWindow verifies that a
+// ManualTouchEvent that is older than the configured window does not block the
+// automated change.
+func TestHandle_ManualTouchCheck_AllowedWhenEventIsOutsideWindow(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	// Event was 2 hours ago, window is 1 hour.
+	mte := &ewv1alpha1.ManualTouchEvent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mte-old",
+			Namespace: "early-watch-system",
+			Labels: map[string]string{
+				"earlywatch.io/resource":           "services",
+				"earlywatch.io/resource-namespace": "default",
+				"earlywatch.io/resource-name":      "my-svc",
+				"earlywatch.io/api-group":          "",
+				"earlywatch.io/operation":          "DELETE",
+			},
+		},
+		Spec: ewv1alpha1.ManualTouchEventSpec{
+			Timestamp:         metav1.NewTime(time.Now().Add(-2 * time.Hour)), // 2 hours ago
+			User:              "kubernetes-admin",
+			UserAgent:         "kubectl/v1.29.0",
+			Operation:         "DELETE",
+			Resource:          "services",
+			ResourceName:      "my-svc",
+			ResourceNamespace: "default",
+			AuditID:           "audit-002",
+			MonitorName:       "my-monitor",
+			MonitorNamespace:  "default",
+		},
+	}
+
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "guard-manual-touch", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-recent-manual-touch",
+					Type:    ewv1alpha1.RuleTypeManualTouchCheck,
+					Message: "a recent manual touch was detected; pipeline change denied",
+					ManualTouchCheck: &ewv1alpha1.ManualTouchCheck{
+						WindowDuration: "1h",
+						EventNamespace: "early-watch-system",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(guard, mte).
+		Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeRequest(admissionv1.Update, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when only old ManualTouchEvent exists: %v", resp.Result)
+	}
+}
+
+// TestEvaluateRule_NilManualTouchCheck verifies that evaluateRule returns an
+// error when ManualTouchCheck is the type but the config pointer is nil.
+func TestEvaluateRule_NilManualTouchCheck(t *testing.T) {
+	h := &AdmissionHandler{}
+	rule := ewv1alpha1.GuardRule{
+		Name:             "bad-rule",
+		Type:             ewv1alpha1.RuleTypeManualTouchCheck,
+		Message:          "msg",
+		ManualTouchCheck: nil,
+	}
+	req := makeRequest(admissionv1.Update, "", "services", "default", "my-svc", nil)
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil ManualTouchCheck config")
+	}
+}
+
+// TestEvaluateManualTouchCheck_InvalidWindowDuration verifies that an invalid
+// duration string returns an error.
+func TestEvaluateManualTouchCheck_InvalidWindowDuration(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	h := &AdmissionHandler{Client: fakeClient}
+
+	check := ewv1alpha1.ManualTouchCheck{WindowDuration: "not-a-duration"}
+	req := makeRequest(admissionv1.Update, "", "services", "default", "my-svc", nil)
+	_, _, err := h.evaluateManualTouchCheck(context.Background(), check, "msg", req)
+	if err == nil {
+		t.Error("expected error for invalid window duration")
+	}
+}
+
 

@@ -174,6 +174,11 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(AnnotationCheck)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.ManualTouchCheck != nil {
+		in, out := &in.ManualTouchCheck, &out.ManualTouchCheck
+		*out = new(ManualTouchCheck)
+		**out = **in
+	}
 }
 
 // DeepCopy returns a deep copy of a GuardRule.
@@ -291,3 +296,268 @@ func (in *AnnotationCheck) DeepCopy() *AnnotationCheck {
 	in.DeepCopyInto(out)
 	return out
 }
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchCheck) DeepCopyInto(out *ManualTouchCheck) {
+	*out = *in
+}
+
+// DeepCopy returns a deep copy of a ManualTouchCheck.
+func (in *ManualTouchCheck) DeepCopy() *ManualTouchCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchMonitor) DeepCopyInto(out *ManualTouchMonitor) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopyObject returns a generically typed copy of an object that is in memory.
+func (in *ManualTouchMonitor) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopy returns a deep copy of a ManualTouchMonitor.
+func (in *ManualTouchMonitor) DeepCopy() *ManualTouchMonitor {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchMonitor)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchMonitorList) DeepCopyInto(out *ManualTouchMonitorList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ManualTouchMonitor, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject returns a generically typed copy of an object that is in memory.
+func (in *ManualTouchMonitorList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopy returns a deep copy of a ManualTouchMonitorList.
+func (in *ManualTouchMonitorList) DeepCopy() *ManualTouchMonitorList {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchMonitorList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchMonitorSpec) DeepCopyInto(out *ManualTouchMonitorSpec) {
+	*out = *in
+	if in.Subjects != nil {
+		in, out := &in.Subjects, &out.Subjects
+		*out = make([]MonitorSubject, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.Operations != nil {
+		in, out := &in.Operations, &out.Operations
+		*out = make([]MonitorOperationType, len(*in))
+		copy(*out, *in)
+	}
+	if in.UserAgentPatterns != nil {
+		in, out := &in.UserAgentPatterns, &out.UserAgentPatterns
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.ExcludeServiceAccounts != nil {
+		in, out := &in.ExcludeServiceAccounts, &out.ExcludeServiceAccounts
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
+	if in.Alerting != nil {
+		in, out := &in.Alerting, &out.Alerting
+		*out = new(AlertingConfig)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy returns a deep copy of a ManualTouchMonitorSpec.
+func (in *ManualTouchMonitorSpec) DeepCopy() *ManualTouchMonitorSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchMonitorSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchMonitorStatus) DeepCopyInto(out *ManualTouchMonitorStatus) {
+	*out = *in
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
+		*out = make([]v1.Condition, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopy returns a deep copy of a ManualTouchMonitorStatus.
+func (in *ManualTouchMonitorStatus) DeepCopy() *ManualTouchMonitorStatus {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchMonitorStatus)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *MonitorSubject) DeepCopyInto(out *MonitorSubject) {
+	*out = *in
+	if in.NamespaceSelector != nil {
+		in, out := &in.NamespaceSelector, &out.NamespaceSelector
+		*out = new(v1.LabelSelector)
+		(*in).DeepCopyInto(*out)
+	}
+}
+
+// DeepCopy returns a deep copy of a MonitorSubject.
+func (in *MonitorSubject) DeepCopy() *MonitorSubject {
+	if in == nil {
+		return nil
+	}
+	out := new(MonitorSubject)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *AlertingConfig) DeepCopyInto(out *AlertingConfig) {
+	*out = *in
+	if in.PrometheusLabels != nil {
+		in, out := &in.PrometheusLabels, &out.PrometheusLabels
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+}
+
+// DeepCopy returns a deep copy of an AlertingConfig.
+func (in *AlertingConfig) DeepCopy() *AlertingConfig {
+	if in == nil {
+		return nil
+	}
+	out := new(AlertingConfig)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchEvent) DeepCopyInto(out *ManualTouchEvent) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+}
+
+// DeepCopyObject returns a generically typed copy of an object that is in memory.
+func (in *ManualTouchEvent) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopy returns a deep copy of a ManualTouchEvent.
+func (in *ManualTouchEvent) DeepCopy() *ManualTouchEvent {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchEvent)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchEventList) DeepCopyInto(out *ManualTouchEventList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ManualTouchEvent, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject returns a generically typed copy of an object that is in memory.
+func (in *ManualTouchEventList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopy returns a deep copy of a ManualTouchEventList.
+func (in *ManualTouchEventList) DeepCopy() *ManualTouchEventList {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchEventList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ManualTouchEventSpec) DeepCopyInto(out *ManualTouchEventSpec) {
+	*out = *in
+	in.Timestamp.DeepCopyInto(&out.Timestamp)
+}
+
+// DeepCopy returns a deep copy of a ManualTouchEventSpec.
+func (in *ManualTouchEventSpec) DeepCopy() *ManualTouchEventSpec {
+	if in == nil {
+		return nil
+	}
+	out := new(ManualTouchEventSpec)
+	in.DeepCopyInto(out)
+	return out
+}
+

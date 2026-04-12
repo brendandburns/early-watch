@@ -1,0 +1,74 @@
+---
+# ClusterRole for the audit monitor.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: early-watch-audit-monitor-role
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: audit-monitor
+rules:
+  # List ManualTouchMonitors to evaluate incoming audit events against.
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - manualtouchmonitors
+    verbs:
+      - get
+      - list
+      - watch
+  # Update ManualTouchMonitor status (touchesDetected counter).
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - manualtouchmonitors/status
+    verbs:
+      - get
+      - patch
+      - update
+  # Create ManualTouchEvent records when a manual touch is detected.
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - manualtouchevents
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - delete
+  # Allow recording Kubernetes events.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+# ServiceAccount for the audit monitor.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: early-watch-audit-monitor
+  namespace: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: audit-monitor
+---
+# ClusterRoleBinding: bind the ClusterRole to the ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: early-watch-audit-monitor-rolebinding
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: audit-monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: early-watch-audit-monitor-role
+subjects:
+  - kind: ServiceAccount
+    name: early-watch-audit-monitor
+    namespace: early-watch-system
