@@ -29,18 +29,21 @@ Example:
 var installFlags struct {
 	kubeconfig string
 	image      string
+	namespace  string
 }
 
 func init() {
 	f := installCmd.Flags()
 	f.StringVar(&installFlags.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file. Defaults to in-cluster config when empty.")
 	f.StringVar(&installFlags.image, "image", "", "Container image for the webhook Deployment. Defaults to early-watch:latest.")
+	f.StringVar(&installFlags.namespace, "namespace", "", "Kubernetes namespace to install EarlyWatch into. Defaults to early-watch-system.")
 }
 
 func runInstall(_ *cobra.Command, _ []string) error {
 	opts := ewinstall.Options{
 		Kubeconfig: installFlags.kubeconfig,
 		Image:      installFlags.image,
+		Namespace:  installFlags.namespace,
 	}
 
 	if err := ewinstall.Run(opts); err != nil {

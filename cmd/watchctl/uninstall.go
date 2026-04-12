@@ -33,16 +33,19 @@ Example:
 
 var uninstallFlags struct {
 	kubeconfig string
+	namespace  string
 }
 
 func init() {
 	f := uninstallCmd.Flags()
 	f.StringVar(&uninstallFlags.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file. Defaults to in-cluster config when empty.")
+	f.StringVar(&uninstallFlags.namespace, "namespace", "", "Kubernetes namespace that EarlyWatch was installed into. Defaults to early-watch-system.")
 }
 
 func runUninstall(_ *cobra.Command, _ []string) error {
 	opts := ewinstall.UninstallOptions{
 		Kubeconfig: uninstallFlags.kubeconfig,
+		Namespace:  uninstallFlags.namespace,
 	}
 
 	if err := ewinstall.Uninstall(opts); err != nil {

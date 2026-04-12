@@ -26,6 +26,9 @@ type UninstallOptions struct {
 	// Kubeconfig is the path to a kubeconfig file. Falls back to in-cluster
 	// config when empty.
 	Kubeconfig string
+	// Namespace is the Kubernetes namespace that EarlyWatch was installed into.
+	// Defaults to defaultNamespace ("early-watch-system") when empty.
+	Namespace string
 }
 
 // Uninstall removes all EarlyWatch infrastructure resources from the cluster
@@ -35,6 +38,10 @@ type UninstallOptions struct {
 // the CRD), minimizing the window during which the webhook could intercept
 // its own teardown.  Resources that no longer exist are silently skipped.
 func Uninstall(opts UninstallOptions) error {
+	if opts.Namespace == "" {
+		opts.Namespace = defaultNamespace
+	}
+
 	cfg, err := buildRESTConfig(opts.Kubeconfig)
 	if err != nil {
 		return fmt.Errorf("building REST config: %w", err)
@@ -76,6 +83,11 @@ func Uninstall(opts UninstallOptions) error {
 		data, err := manifestsFS.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading embedded manifest %q: %w", path, err)
+		}
+
+		// Substitute namespace placeholder so resource names resolve correctly.
+		if opts.Namespace != defaultNamespace {
+			data = bytes.ReplaceAll(data, []byte(defaultNamespace), []byte(opts.Namespace))
 		}
 
 		decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
@@ -140,6 +152,18 @@ func Uninstall(opts UninstallOptions) error {
 		}
 
 		fmt.Printf("Deleted %s %q\n", obj.GetKind(), resourceDisplayName(obj))
+	}
+
+	// Delete the namespace last (it was created programmatically by install,
+	// not from a manifest).  Resources inside the namespace are already gone
+	// at this point, so the namespace should terminate quickly.
+	if err := dynClient.Resource(namespaceGVR).Delete(ctx, opts.Namespace, metav1.DeleteOptions{}); err != nil {
+		if !kerrors.IsNotFound(err) {
+			return fmt.Errorf("deleting namespace %q: %w", opts.Namespace, err)
+		}
+		fmt.Printf("Skipped Namespace %q (not found)\n", opts.Namespace)
+	} else {
+		fmt.Printf("Deleted Namespace %q\n", opts.Namespace)
 	}
 
 	fmt.Println("EarlyWatch uninstallation complete.")
