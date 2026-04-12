@@ -386,7 +386,7 @@ func TestApplyManifest_RESTMapperError(t *testing.T) {
 
 func TestApplyManifest_PatchError(t *testing.T) {
 	patchErr := fmt.Errorf("server unavailable")
-	records := []patchRecord{}
+	var records []patchRecord
 	fdc := newRecordingDynamic(&records, patchErr)
 
 	err := applyManifest(context.Background(), fdc, newNamespacedMapper(), []byte(validCVYAML), "test.yaml")
