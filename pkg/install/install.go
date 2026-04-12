@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
@@ -41,6 +43,20 @@ const CreatedByAnnotation = "earlywatch.io/created-by"
 
 // managedByValue is the value written to ManagedByAnnotation.
 const managedByValue = "watchctl"
+
+// systemNamespace is the Kubernetes namespace where EarlyWatch is installed.
+const systemNamespace = "early-watch-system"
+
+// webhookServiceName is the name of the Service fronting the webhook Deployment.
+const webhookServiceName = "early-watch-webhook-service"
+
+// webhookTLSSecretName is the name of the Secret that stores the webhook TLS cert.
+const webhookTLSSecretName = "early-watch-webhook-server-cert"
+
+// objectModifier is an optional hook called on each parsed Kubernetes object
+// before it is Server-Side Applied.  Implementations may mutate the object
+// in-place (e.g. to inject dynamic values such as a CA bundle).
+type objectModifier func(*unstructured.Unstructured)
 
 // Options holds the parameters for an install operation.
 type Options struct {
@@ -78,6 +94,34 @@ func Run(opts Options) error {
 
 	ctx := context.Background()
 
+	// Ensure the system namespace exists before applying any namespace-scoped
+	// resources (e.g. the ServiceAccount in 01-rbac.yaml).
+	if err := ensureNamespace(ctx, dynClient); err != nil {
+		return err
+	}
+
+	// Generate TLS certificates for the webhook server.  The CA certificate is
+	// later injected into the ValidatingWebhookConfiguration so the API server
+	// can verify the webhook's TLS certificate without relying on cert-manager.
+	certs, err := generateWebhookCerts()
+	if err != nil {
+		return fmt.Errorf("generating webhook TLS certificates: %w", err)
+	}
+
+	// Store the TLS certificate and key in a Secret so the webhook Deployment
+	// can mount them.
+	if err := applyTLSSecret(ctx, dynClient, certs); err != nil {
+		return err
+	}
+
+	// Modifier that injects the generated CA bundle into the
+	// ValidatingWebhookConfiguration before it is Server-Side Applied.
+	modifier := func(obj *unstructured.Unstructured) {
+		if obj.GetKind() == "ValidatingWebhookConfiguration" {
+			injectCABundle(obj, certs.caCert)
+		}
+	}
+
 	// Apply manifests in order: CRD first, then RBAC, then webhook resources.
 	entries, err := fs.ReadDir(manifestsFS, "manifests")
 	if err != nil {
@@ -99,7 +143,7 @@ func Run(opts Options) error {
 			data = bytes.ReplaceAll(data, []byte(defaultWebhookImage), []byte(opts.Image))
 		}
 
-		if err := applyManifest(ctx, dynClient, mapper, data, entry.Name()); err != nil {
+		if err := applyManifest(ctx, dynClient, mapper, data, entry.Name(), modifier); err != nil {
 			return err
 		}
 	}
@@ -109,13 +153,15 @@ func Run(opts Options) error {
 }
 
 // applyManifest splits a potentially multi-document YAML file and applies
-// each document to the cluster using Server-Side Apply.
+// each document to the cluster using Server-Side Apply.  If modifier is
+// non-nil it is called on each parsed object before it is applied.
 func applyManifest(
 	ctx context.Context,
 	dynClient dynamic.Interface,
 	mapper meta.RESTMapper,
 	data []byte,
 	filename string,
+	modifier objectModifier,
 ) error {
 	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
 	for {
@@ -139,6 +185,11 @@ func applyManifest(
 		// Stamp every resource with the managed-by annotation so it can be
 		// identified and removed later.
 		injectAnnotation(obj, CreatedByAnnotation, managedByValue)
+
+		// Allow the caller to mutate the object before it is applied.
+		if modifier != nil {
+			modifier(obj)
+		}
 
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
@@ -211,6 +262,104 @@ func injectAnnotation(obj *unstructured.Unstructured, key, value string) {
 	}
 	annotations[key] = value
 	obj.SetAnnotations(annotations)
+}
+
+// ensureNamespace applies a Server-Side Apply patch to create (or confirm the
+// existence of) the EarlyWatch system namespace.  This must be called before
+// any namespace-scoped resources (such as the ServiceAccount in the RBAC
+// manifest) are applied.
+func ensureNamespace(ctx context.Context, dynClient dynamic.Interface) error {
+	nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
+	nsObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name": systemNamespace,
+			"labels": map[string]interface{}{
+				"app.kubernetes.io/name": "early-watch",
+			},
+			"annotations": map[string]interface{}{
+				CreatedByAnnotation: managedByValue,
+			},
+		},
+	}
+	jsonData, err := json.Marshal(nsObj)
+	if err != nil {
+		return fmt.Errorf("marshalling Namespace %q: %w", systemNamespace, err)
+	}
+	if _, err := dynClient.Resource(nsGVR).Patch(
+		ctx, systemNamespace, types.ApplyPatchType, jsonData,
+		metav1.PatchOptions{FieldManager: fieldManager, Force: boolPtr(true)},
+	); err != nil {
+		return fmt.Errorf("ensuring Namespace %q: %w", systemNamespace, err)
+	}
+	fmt.Printf("Applied Namespace %q\n", systemNamespace)
+	return nil
+}
+
+// applyTLSSecret creates or updates the Kubernetes Secret that holds the
+// webhook server's TLS certificate and private key.
+func applyTLSSecret(ctx context.Context, dynClient dynamic.Interface, certs *webhookCerts) error {
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
+	secretObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]interface{}{
+			"name":      webhookTLSSecretName,
+			"namespace": systemNamespace,
+			"annotations": map[string]interface{}{
+				CreatedByAnnotation: managedByValue,
+			},
+		},
+		"type": "kubernetes.io/tls",
+		// Secret.data values are []byte; json.Marshal base64-encodes them.
+		"data": map[string]interface{}{
+			"tls.crt": certs.tlsCert,
+			"tls.key": certs.tlsKey,
+		},
+	}
+	jsonData, err := json.Marshal(secretObj)
+	if err != nil {
+		return fmt.Errorf("marshalling TLS Secret: %w", err)
+	}
+	if _, err := dynClient.Resource(secretGVR).Namespace(systemNamespace).Patch(
+		ctx, webhookTLSSecretName, types.ApplyPatchType, jsonData,
+		metav1.PatchOptions{FieldManager: fieldManager, Force: boolPtr(true)},
+	); err != nil {
+		return fmt.Errorf("applying TLS Secret %q: %w", webhookTLSSecretName, err)
+	}
+	fmt.Printf("Applied Secret %q\n", systemNamespace+"/"+webhookTLSSecretName)
+	return nil
+}
+
+// injectCABundle sets the caBundle field on every webhook entry inside a
+// ValidatingWebhookConfiguration unstructured object.  caCert must be a
+// PEM-encoded CA certificate; it is base64-encoded before being stored so
+// that json.Marshal produces the correct Kubernetes API wire format.
+func injectCABundle(obj *unstructured.Unstructured, caCert []byte) {
+	webhooks, found, err := unstructured.NestedSlice(obj.Object, "webhooks")
+	if err != nil || !found {
+		return
+	}
+
+	// base64-encode the PEM bytes: this is what the Kubernetes API stores in
+	// the caBundle string field.
+	caBundleB64 := base64.StdEncoding.EncodeToString(caCert)
+
+	for i := range webhooks {
+		wh, ok := webhooks[i].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cc, ok := wh["clientConfig"].(map[string]interface{})
+		if !ok {
+			cc = make(map[string]interface{})
+		}
+		cc["caBundle"] = caBundleB64
+		wh["clientConfig"] = cc
+		webhooks[i] = wh
+	}
+	_ = unstructured.SetNestedSlice(obj.Object, webhooks, "webhooks")
 }
 
 func boolPtr(b bool) *bool { return &b }

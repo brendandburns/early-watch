@@ -79,8 +79,8 @@ spec:
       volumes:
         - name: cert
           secret:
-            # This secret is managed by cert-manager (see config/certmanager/).
-            # Replace with your own TLS secret if cert-manager is not available.
+            # This Secret is populated by "watchctl install" with a TLS certificate
+            # signed by the installer-generated CA.
             secretName: early-watch-webhook-server-cert
       terminationGracePeriodSeconds: 10
       securityContext:
@@ -109,6 +109,8 @@ spec:
 ---
 # ValidatingWebhookConfiguration instructs the Kubernetes API server to forward
 # admission requests to the EarlyWatch webhook server before persisting changes.
+# The caBundle is populated by "watchctl install" using the built-in Kubernetes
+# TLS certificate generation; no cert-manager dependency is required.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
@@ -116,10 +118,6 @@ metadata:
   labels:
     app.kubernetes.io/name: early-watch
     app.kubernetes.io/component: webhook
-  annotations:
-    # cert-manager injects the CA bundle automatically when this annotation
-    # is present and cert-manager is installed in the cluster.
-    cert-manager.io/inject-ca-from: early-watch-system/early-watch-serving-cert
 webhooks:
   - name: validate.earlywatch.io
     admissionReviewVersions:
@@ -129,8 +127,7 @@ webhooks:
         name: early-watch-webhook-service
         namespace: early-watch-system
         path: /validate
-      # caBundle is populated by cert-manager or must be set manually.
-      # caBundle: ""
+      caBundle: ""  # populated by "watchctl install"
     rules:
       # The webhook is registered for ALL resources so that ChangeValidator rules
       # can target any resource type without requiring a webhook restart.
