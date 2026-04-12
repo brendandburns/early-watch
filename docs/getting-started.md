@@ -37,6 +37,12 @@ Use `--image` to specify a custom container image:
 ./watchctl install --image ghcr.io/my-org/early-watch:v1.2.3
 ```
 
+To also install the audit-monitor for [manual touch monitoring](../docs/rule-types/manual-touch-check.md), pass `--manual-touch`:
+
+```bash
+./watchctl install --manual-touch
+```
+
 See [cli/install.md](cli/install.md) for the full flag reference.
 
 ---
