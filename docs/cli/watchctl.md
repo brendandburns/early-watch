@@ -19,7 +19,7 @@ go build -o watchctl ./cmd/watchctl/...
 | Subcommand | Description |
 |------------|-------------|
 | [`watchctl install`](install.md) | Install all EarlyWatch infrastructure (CRD, RBAC, webhook) onto the current cluster. |
-| [`watchctl uninstall`](uninstall.md) | Remove all EarlyWatch infrastructure from the current cluster. |
+| [`watchctl uninstall`](install.md) | Remove all EarlyWatch infrastructure from the current cluster. |
 | [`watchctl approve`](approve.md) | Sign a Kubernetes resource's canonical path with an RSA private key and write the signature as an approval annotation. |
 
 ---
