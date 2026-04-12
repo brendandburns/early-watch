@@ -8,7 +8,7 @@ When reviewing pull requests, prioritize the following:
 
 ### Correctness and Safety
 - Admission webhook handlers must always return a well-formed `admission.Response`. Ensure every code path returns a fully populated allow, deny, or error response rather than an incomplete default response.
-- Rule evaluation logic (ExistingResources, ExpressionCheck, NameReferenceCheck, CheckLock) must be exhaustive — verify there are no unhandled rule types that could silently allow unsafe operations.
+- Rule evaluation logic must be exhaustive — verify there are no unhandled rule types that could silently allow unsafe operations, and use the `RuleType` enum (or equivalent source-of-truth definition) rather than a partial inline list when reviewing implemented checks.
 - Label selector construction from resource fields must correctly handle nil or empty selectors.
 
 ### Kubernetes API Usage
