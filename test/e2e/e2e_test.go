@@ -30,8 +30,8 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/dynamic"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -53,7 +53,7 @@ var (
 	// important for the cleanup helper, which must see deleted ChangeValidators
 	// before attempting to delete guarded resources.
 	k8sClient client.Client
-	dynClient  dynamic.Interface
+	dynClient dynamic.Interface
 
 	// mgrCtx is cancelled in TestMain after all tests have run in order to
 	// shut down the webhook server.

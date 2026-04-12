@@ -276,10 +276,16 @@ This project uses [golangci-lint](https://golangci-lint.run/) to enforce code st
 
 This configures git to run the linter automatically on every `git commit` and `git push`.
 
-**Run the linter manually:**
+**Run the linter:**
 
 ```sh
-golangci-lint run --config .golangci.yml ./...
+./scripts/lint.sh
+```
+
+**Auto-fix formatting and style issues** (runs `gofmt -s`, `goimports`, and `golangci-lint --fix`):
+
+```sh
+./scripts/fix.sh
 ```
 
 Linting is also enforced in CI — the `Lint` workflow runs on every pull request targeting `main`.
