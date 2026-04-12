@@ -10,6 +10,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -762,22 +763,8 @@ func TestAppliesToRequest_NamesFilter_EmptyMatchesAll(t *testing.T) {
 }
 
 // labelsFromMap is a helper that converts a plain map to a labels.Set.
-func labelsFromMap(m map[string]string) interface {
-	Has(label string) bool
-	Get(label string) string
-} {
-	return labelSet(m)
-}
-
-type labelSet map[string]string
-
-func (s labelSet) Has(label string) bool {
-	_, ok := s[label]
-	return ok
-}
-
-func (s labelSet) Get(label string) string {
-	return s[label]
+func labelsFromMap(m map[string]string) labels.Labels {
+	return labels.Set(m)
 }
 
 // --- nameExistsAtPath tests ---
