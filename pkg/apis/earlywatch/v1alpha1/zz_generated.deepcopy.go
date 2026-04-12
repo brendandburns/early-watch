@@ -169,6 +169,11 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(NameReferenceCheck)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.ApprovalCheck != nil {
+		in, out := &in.ApprovalCheck, &out.ApprovalCheck
+		*out = new(ApprovalCheck)
+		**out = **in
+	}
 	if in.AnnotationCheck != nil {
 		in, out := &in.AnnotationCheck, &out.AnnotationCheck
 		*out = new(AnnotationCheck)
@@ -267,6 +272,22 @@ func (in *NameReferenceResource) DeepCopy() *NameReferenceResource {
 		return nil
 	}
 	out := new(NameReferenceResource)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ApprovalCheck) DeepCopyInto(out *ApprovalCheck) {
+	*out = *in
+}
+
+// DeepCopy returns a deep copy of an ApprovalCheck.
+func (in *ApprovalCheck) DeepCopy() *ApprovalCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(ApprovalCheck)
 	in.DeepCopyInto(out)
 	return out
 }
