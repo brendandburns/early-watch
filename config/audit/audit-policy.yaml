@@ -50,10 +50,11 @@ rules:
       - group: ""
         resources: ["events"]
 
-  # Capture RequestResponse-level audit events for all mutating verbs on all
-  # remaining resources.  This gives EarlyWatch enough information to identify
-  # manual touches (kubectl operations) by inspecting the User-Agent header.
-  - level: RequestResponse
+  # Capture Metadata-level audit events for all mutating verbs on all
+  # remaining resources. This preserves the fields EarlyWatch needs to identify
+  # manual touches (kubectl operations) by inspecting request metadata such as
+  # the User-Agent header, without logging full request/response bodies.
+  - level: Metadata
     verbs: ["create", "update", "patch", "delete", "deletecollection"]
     omitStages:
       - "RequestReceived"
