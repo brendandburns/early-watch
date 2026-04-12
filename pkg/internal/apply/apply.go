@@ -54,7 +54,7 @@ func ApplyManifest(
 		}
 
 		if obj.GetName() == "" {
-			return fmt.Errorf("resource of kind %s in %q is missing metadata.name", gvk.Kind, filename)
+			return fmt.Errorf("resource %s in %q is missing metadata.name", gvk.String(), filename)
 		}
 
 		if preApply != nil {
