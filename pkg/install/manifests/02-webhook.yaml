@@ -1,0 +1,159 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: early-watch-webhook
+  namespace: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: early-watch
+      app.kubernetes.io/component: webhook
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: early-watch
+        app.kubernetes.io/component: webhook
+    spec:
+      serviceAccountName: early-watch
+      containers:
+        - name: webhook
+          image: early-watch:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - --cert-dir=/tmp/k8s-webhook-server/serving-certs
+            - --webhook-port=9443
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          ports:
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: healthz
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: cert
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: cert
+          secret:
+            # This secret is managed by cert-manager (see config/certmanager/).
+            # Replace with your own TLS secret if cert-manager is not available.
+            secretName: early-watch-webhook-server-cert
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+---
+# Service exposes the admission webhook server to the API server.
+apiVersion: v1
+kind: Service
+metadata:
+  name: early-watch-webhook-service
+  namespace: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+spec:
+  selector:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+  ports:
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 9443
+---
+# ValidatingWebhookConfiguration instructs the Kubernetes API server to forward
+# admission requests to the EarlyWatch webhook server before persisting changes.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: early-watch-validating-webhook
+  labels:
+    app.kubernetes.io/name: early-watch
+    app.kubernetes.io/component: webhook
+  annotations:
+    # cert-manager injects the CA bundle automatically when this annotation
+    # is present and cert-manager is installed in the cluster.
+    cert-manager.io/inject-ca-from: early-watch-system/early-watch-serving-cert
+webhooks:
+  - name: validate.earlywatch.io
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: early-watch-webhook-service
+        namespace: early-watch-system
+        path: /validate
+      # caBundle is populated by cert-manager or must be set manually.
+      # caBundle: ""
+    rules:
+      # The webhook is registered for ALL resources so that ChangeValidator rules
+      # can target any resource type without requiring a webhook restart.
+      - apiGroups:
+          - "*"
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+          - DELETE
+          - CONNECT
+        resources:
+          - "*"
+        scope: "*"
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    sideEffects: None
+    timeoutSeconds: 10
+    # Prevent the webhook from intercepting its own resources to avoid deadlocks.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - early-watch-system

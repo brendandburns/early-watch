@@ -166,13 +166,17 @@ early-watch/
 ├── cmd/
 │   ├── watchctl/
 │   │   ├── main.go                   # watchctl CLI entry point (cobra root command)
-│   │   └── approve.go                # watchctl approve subcommand
+│   │   ├── approve.go                # watchctl approve subcommand
+│   │   └── install.go                # watchctl install subcommand
 │   └── webhook/
 │       └── main.go                   # Admission webhook server entry point
 ├── pkg/
 │   ├── approve/
 │   │   ├── approve.go                # Core approve logic (sign + annotate)
 │   │   └── approve_test.go           # Unit tests for approve logic
+│   ├── install/
+│   │   ├── install.go                # Core install logic (embed + apply manifests)
+│   │   └── manifests/                # Embedded YAML manifests (CRD, RBAC, webhook)
 │   ├── apis/
 │   │   └── earlywatch/
 │   │       └── v1alpha1/
@@ -243,7 +247,30 @@ go test ./...
 
 | Subcommand | Description |
 |------------|-------------|
+| `watchctl install` | Install all EarlyWatch infrastructure (CRD, RBAC, webhook) onto the current cluster. |
 | `watchctl approve` | Sign a Kubernetes resource's canonical path with an RSA private key and write the signature as an approval annotation. |
+
+### `watchctl install`
+
+The `install` subcommand applies all EarlyWatch infrastructure manifests in the correct order using Server-Side Apply.  Running it multiple times is safe (idempotent).
+
+```bash
+# Install using the current kubeconfig context
+watchctl install
+
+# Install with an explicit kubeconfig
+watchctl install --kubeconfig ~/.kube/config
+
+# Install with a custom webhook image
+watchctl install --image ghcr.io/my-org/early-watch:v1.2.3
+```
+
+**Optional flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--kubeconfig` | `""` | Path to kubeconfig; falls back to in-cluster config. |
+| `--image` | `early-watch:latest` | Container image for the webhook Deployment. |
 
 ### `watchctl approve`
 
