@@ -7,7 +7,7 @@ This repository implements **EarlyWatch**, a Kubernetes admission controller wri
 When reviewing pull requests, prioritize the following:
 
 ### Correctness and Safety
-- Admission webhook handlers must always return a well-formed `AdmissionResponse`. Ensure error paths never return nil or incomplete responses.
+- Admission webhook handlers must always return a well-formed `admission.Response`. Ensure every code path returns a fully populated allow, deny, or error response rather than an incomplete default response.
 - Rule evaluation logic (ExistingResources, ExpressionCheck, NameReferenceCheck, CheckLock) must be exhaustive — verify there are no unhandled rule types that could silently allow unsafe operations.
 - Label selector construction from resource fields must correctly handle nil or empty selectors.
 
