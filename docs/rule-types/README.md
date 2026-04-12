@@ -9,7 +9,7 @@ EarlyWatch evaluates rules defined in a `ChangeValidator`'s `spec.rules` list.  
 | Type | Summary | Reference |
 |------|---------|-----------|
 | `ExistingResources` | Deny when dependent resources (e.g. Pods) still exist in the cluster. | [existing-resources.md](existing-resources.md) |
-| `ExpressionCheck` | Evaluate a CEL expression against the admission request; deny when it returns `true`. | [expression-check.md](expression-check.md) |
+| `ExpressionCheck` | Evaluate a `field == 'value'` expression against the admission request (operation/namespace/name); deny when it matches. | [expression-check.md](expression-check.md) |
 | `NameReferenceCheck` | Deny when the subject is referenced by name in other cluster resources (e.g. a ConfigMap mounted by a Deployment). | [name-reference-check.md](name-reference-check.md) |
 | `CheckLock` | Deny when the subject carries the `earlywatch.io/lock` annotation with a non-empty value. | [check-lock.md](check-lock.md) |
 | `AnnotationCheck` | Deny when the subject does not carry a required annotation (confirm-delete pattern). | [annotation-check.md](annotation-check.md) |
@@ -24,7 +24,7 @@ EarlyWatch evaluates rules defined in a `ChangeValidator`'s `spec.rules` list.  
 |----------|-----------------|
 | Prevent deletion of a resource while dependents still exist | `ExistingResources` |
 | Prevent deletion of a resource that is still referenced by name from other resources | `NameReferenceCheck` |
-| Allow only specific users/groups to perform an operation | `ExpressionCheck` |
+| Allow only specific operations or restrict to a specific namespace/name | `ExpressionCheck` |
 | Give operators a quick, reversible lock on any resource | `CheckLock` |
 | Require an explicit annotation before a destructive operation proceeds | `AnnotationCheck` |
 | Require cryptographically verifiable sign-off from a key holder | `ApprovalCheck` |

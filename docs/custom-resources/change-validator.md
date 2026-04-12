@@ -115,7 +115,7 @@ A list of `GuardRule` objects.  All rules are evaluated; the first violation den
 | Type | Description | Reference |
 |------|-------------|-----------|
 | `ExistingResources` | Denies when dependent resources still exist in the cluster. | [existing-resources.md](../rule-types/existing-resources.md) |
-| `ExpressionCheck` | Evaluates a CEL expression against the admission request. | [expression-check.md](../rule-types/expression-check.md) |
+| `ExpressionCheck` | Evaluates a `field == 'value'` expression against the admission request (supported fields: `operation`, `namespace`, `name`). | [expression-check.md](../rule-types/expression-check.md) |
 | `NameReferenceCheck` | Denies when the subject is referenced by name in other resources. | [name-reference-check.md](../rule-types/name-reference-check.md) |
 | `CheckLock` | Denies when the subject carries the `earlywatch.io/lock` annotation. | [check-lock.md](../rule-types/check-lock.md) |
 | `AnnotationCheck` | Denies when the subject lacks a required annotation. | [annotation-check.md](../rule-types/annotation-check.md) |

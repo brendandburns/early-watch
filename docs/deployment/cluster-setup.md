@@ -18,6 +18,8 @@ For the recommended one-command install, see [getting-started.md](../getting-sta
 
 ```bash
 kubectl apply -f config/crd/bases/earlywatch.io_changevalidators.yaml
+kubectl apply -f config/crd/bases/earlywatch.io_manualtouchmonitors.yaml
+kubectl apply -f config/crd/bases/earlywatch.io_manualtouchevents.yaml
 ```
 
 This installs the `ChangeValidator`, `ManualTouchMonitor`, and `ManualTouchEvent` custom resource definitions.
@@ -99,6 +101,8 @@ Remove resources in reverse order to avoid leaving the webhook intercepting requ
 kubectl delete -f config/webhook/
 kubectl delete -f config/rbac/
 kubectl delete namespace early-watch-system
+kubectl delete -f config/crd/bases/earlywatch.io_manualtouchevents.yaml
+kubectl delete -f config/crd/bases/earlywatch.io_manualtouchmonitors.yaml
 kubectl delete -f config/crd/bases/earlywatch.io_changevalidators.yaml
 ```
 

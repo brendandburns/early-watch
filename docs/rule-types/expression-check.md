@@ -1,12 +1,14 @@
 # Rule Type: ExpressionCheck
 
-The `ExpressionCheck` rule type **evaluates a [Common Expression Language (CEL)](https://cel.dev/) expression against the admission request and denies the request when the expression returns `true`**.
+The `ExpressionCheck` rule type **evaluates a simple field expression against the admission request and denies the request when the expression returns `true`**.
+
+> **Note:** The current implementation supports only a minimal `field == 'value'` syntax.  The evaluated fields are `operation`, `namespace`, and `name`.  Full [CEL](https://cel.dev/) support is planned for a future release.
 
 ---
 
 ## When to Use
 
-Use `ExpressionCheck` when you need fine-grained control over which requests are blocked based on properties of the admission request itself — the operation type, the user, the object fields, or any combination thereof.
+Use `ExpressionCheck` when you need to block requests based on a specific property of the admission request — for example, restricting which operations are allowed on a resource, or limiting changes to a specific namespace.
 
 ---
 
@@ -14,52 +16,43 @@ Use `ExpressionCheck` when you need fine-grained control over which requests are
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `expression` | string | Yes | A CEL expression that receives the admission request as `request` and must return a boolean. The request is **denied** when the expression returns `true`. |
+| `expression` | string | Yes | An expression of the form `field == 'value'`. The request is **denied** when the expression evaluates to `true`. |
 
 ---
 
-## CEL Variables
+## Supported Fields
 
-The expression receives the admission request object as the variable `request`.  Useful fields:
-
-| Variable | Type | Description |
-|----------|------|-------------|
-| `request.operation` | string | Admission operation: `"CREATE"`, `"UPDATE"`, `"DELETE"`, or `"CONNECT"`. |
-| `request.name` | string | Name of the resource being changed. |
-| `request.namespace` | string | Namespace of the resource (empty for cluster-scoped resources). |
-| `request.userInfo.username` | string | Kubernetes username of the requester. |
-| `request.userInfo.groups` | list(string) | Groups the requester belongs to. |
-| `request.object` | map | The new object (null for DELETE). |
-| `request.oldObject` | map | The existing object (null for CREATE). |
+| Field | Description |
+|-------|-------------|
+| `operation` | Admission operation: `"CREATE"`, `"UPDATE"`, `"DELETE"`, or `"CONNECT"`. |
+| `namespace` | Namespace of the resource being changed. |
+| `name` | Name of the resource being changed. |
 
 ---
 
-## Example — Block DELETE Unless User is in a Specific Group
+## Example — Deny DELETE for a Specific Namespace
 
 ```yaml
 rules:
-  - name: only-admins-can-delete
+  - name: block-delete-in-production
     type: ExpressionCheck
     expressionCheck:
-      expression: >
-        request.operation == 'DELETE' &&
-        !('system:cluster-admins' in request.userInfo.groups)
+      expression: "namespace == 'production'"
     message: >
-      Only members of the cluster-admins group may delete this resource.
+      Direct deletion is not permitted in the production namespace.
 ```
 
 ---
 
-## Example — Require a Specific Label Before Update
+## Example — Deny a Specific Operation
 
 ```yaml
 rules:
-  - name: update-requires-approved-label
+  - name: block-updates
     type: ExpressionCheck
     expressionCheck:
-      expression: >
-        request.operation == 'UPDATE' &&
-        !('earlywatch.io/approved' in request.object.metadata.annotations)
+      expression: "operation == 'UPDATE'"
     message: >
-      This resource cannot be updated without the earlywatch.io/approved annotation.
+      Updates to this resource are not allowed.
 ```
+

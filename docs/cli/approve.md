@@ -66,16 +66,23 @@ openssl rsa -in private-key.pem -pubout -out public-key.pem
 The signature is computed using **RSA-PSS with SHA-256** over the resource's canonical path string.  The canonical path format is:
 
 ```
-# Namespaced resources
+# Namespaced resources (named API group)
 <group>/<version>/namespaces/<namespace>/<resource>/<name>
 
-# Cluster-scoped resources
+# Namespaced resources (core group, group == "")
+<version>/namespaces/<namespace>/<resource>/<name>
+
+# Cluster-scoped resources (named API group)
 <group>/<version>/<resource>/<name>
+
+# Cluster-scoped resources (core group, group == "")
+<version>/<resource>/<name>
 ```
 
-For core-group resources (`group == ""`), the path starts with a `/`:
+Examples:
 
 ```
-/v1/namespaces/default/configmaps/my-config
+v1/namespaces/default/configmaps/my-config
 apps/v1/namespaces/production/deployments/web-api
+v1/namespaces/production
 ```

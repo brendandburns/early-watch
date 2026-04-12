@@ -29,19 +29,25 @@ Use `ApprovalCheck` when you want cryptographically verifiable approval of a spe
 The signature is computed over the resource's canonical path string:
 
 ```
-# Namespaced resources
+# Namespaced resources (named API group)
 <group>/<version>/namespaces/<namespace>/<resource>/<name>
 
-# Cluster-scoped resources
+# Namespaced resources (core group, group == "")
+<version>/namespaces/<namespace>/<resource>/<name>
+
+# Cluster-scoped resources (named API group)
 <group>/<version>/<resource>/<name>
+
+# Cluster-scoped resources (core group, group == "")
+<version>/<resource>/<name>
 ```
 
 Examples:
 
 ```
-/v1/namespaces/default/configmaps/my-config
+v1/namespaces/default/configmaps/my-config
 apps/v1/namespaces/production/deployments/web-api
-/v1/namespaces/production
+v1/namespaces/production
 ```
 
 ---

@@ -4,7 +4,7 @@ The `install` subcommand applies all EarlyWatch infrastructure manifests onto th
 
 The following resources are created:
 
-1. `ChangeValidator`, `ManualTouchMonitor`, and `ManualTouchEvent` CRDs
+1. `ChangeValidator` CRD
 2. `early-watch-system` namespace, `ClusterRole`, `ClusterRoleBinding`, and `ServiceAccount`
 3. Webhook `Deployment` and `Service`
 4. `ValidatingWebhookConfiguration`
