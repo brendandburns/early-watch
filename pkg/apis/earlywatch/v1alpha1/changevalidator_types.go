@@ -218,7 +218,8 @@ type NameReferenceCheck struct {
 	SameNamespace *bool `json:"sameNamespace,omitempty"`
 }
 
-// NameReferenceResource describes a single resource type to scan for// references to the subject resource by name.
+// NameReferenceResource describes a single resource type to scan for
+// references to the subject resource by name.
 type NameReferenceResource struct {
 	// APIGroup is the API group of the resource type to scan.
 	// Use "" for core resources and "apps" for Deployments/DaemonSets.
