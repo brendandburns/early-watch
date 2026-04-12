@@ -1,6 +1,6 @@
 module github.com/brendandburns/early-watch
 
-go 1.24.13
+go 1.26.2
 
 require (
 	k8s.io/api v0.29.3
