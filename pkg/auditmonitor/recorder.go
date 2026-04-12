@@ -39,8 +39,8 @@ const (
 // TouchRecorder creates ManualTouchEvent custom resources in the cluster and
 // optionally sends notifications to configured alerting sinks.
 type TouchRecorder struct {
-	Client          client.Client
-	EventNamespace  string
+	Client         client.Client
+	EventNamespace string
 }
 
 // Record creates a ManualTouchEvent for the given TouchRecord and sends

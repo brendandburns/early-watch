@@ -100,7 +100,7 @@ func (d *TouchDetector) Detect(ctx context.Context, event *AuditEvent) ([]TouchR
 		return nil, fmt.Errorf("listing ManualTouchMonitors: %w", err)
 	}
 
-	var records []TouchRecord
+	records := make([]TouchRecord, 0, len(monitorList.Items))
 
 	for i := range monitorList.Items {
 		monitor := &monitorList.Items[i]
