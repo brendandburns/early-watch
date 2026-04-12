@@ -12,6 +12,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/watchctl-e2e-tests.yml'
+      - 'config/samples/**'
   pull_request:
     branches: [main]
     paths:
@@ -23,6 +24,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/watchctl-e2e-tests.yml'
+      - 'config/samples/**'
 
 jobs:
   watchctl-e2e:
@@ -112,6 +114,10 @@ jobs:
 
       - name: Verify namespace was removed
         run: |
+          if ! kubectl get namespace early-watch-system >/dev/null 2>&1; then
+            echo "Namespace successfully removed"
+            exit 0
+          fi
           kubectl wait --for=delete namespace/early-watch-system --timeout=60s \
             || { echo "ERROR: Namespace early-watch-system still exists after uninstall"; exit 1; }
           echo "Namespace successfully removed"
