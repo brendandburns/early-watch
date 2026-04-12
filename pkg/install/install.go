@@ -11,9 +11,11 @@ import (
 	"io"
 	"io/fs"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/discovery"
@@ -30,6 +32,13 @@ var manifestsFS embed.FS
 // defaultWebhookImage is the container image used by the webhook Deployment
 // when no override is provided.
 const defaultWebhookImage = "early-watch:latest"
+
+// defaultNamespace is the Kubernetes namespace used for EarlyWatch resources
+// when no override is provided via Options.Namespace.
+const defaultNamespace = "early-watch-system"
+
+// namespaceGVR is the GroupVersionResource for Namespace objects.
+var namespaceGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
 
 // fieldManager is the field manager name used for Server-Side Apply.
 const fieldManager = "watchctl"
@@ -50,6 +59,9 @@ type Options struct {
 	// Image overrides the container image for the webhook Deployment.
 	// Defaults to defaultWebhookImage when empty.
 	Image string
+	// Namespace is the Kubernetes namespace to install EarlyWatch into.
+	// Defaults to defaultNamespace ("early-watch-system") when empty.
+	Namespace string
 }
 
 // Run applies all EarlyWatch infrastructure manifests to the cluster
@@ -57,6 +69,9 @@ type Options struct {
 func Run(opts Options) error {
 	if opts.Image == "" {
 		opts.Image = defaultWebhookImage
+	}
+	if opts.Namespace == "" {
+		opts.Namespace = defaultNamespace
 	}
 
 	cfg, err := buildRESTConfig(opts.Kubeconfig)
@@ -78,6 +93,13 @@ func Run(opts Options) error {
 
 	ctx := context.Background()
 
+	// Create the target namespace before applying any manifests so that
+	// namespace-scoped resources (ServiceAccount, Deployment, Service) can
+	// be created successfully.  An existing namespace is not an error.
+	if err := ensureNamespace(ctx, dynClient, opts.Namespace); err != nil {
+		return err
+	}
+
 	// Apply manifests in order: CRD first, then RBAC, then webhook resources.
 	entries, err := fs.ReadDir(manifestsFS, "manifests")
 	if err != nil {
@@ -98,6 +120,11 @@ func Run(opts Options) error {
 		if opts.Image != defaultWebhookImage {
 			data = bytes.ReplaceAll(data, []byte(defaultWebhookImage), []byte(opts.Image))
 		}
+		// Substitute namespace placeholder so all resource references point to
+		// the configured namespace.
+		if opts.Namespace != defaultNamespace {
+			data = bytes.ReplaceAll(data, []byte(defaultNamespace), []byte(opts.Namespace))
+		}
 
 		if err := applyManifest(ctx, dynClient, mapper, data, entry.Name()); err != nil {
 			return err
@@ -105,6 +132,35 @@ func Run(opts Options) error {
 	}
 
 	fmt.Println("EarlyWatch installation complete.")
+	return nil
+}
+
+// ensureNamespace creates the named namespace, stamped with the managed-by
+// annotation.  If the namespace already exists the call is a no-op.
+func ensureNamespace(ctx context.Context, dynClient dynamic.Interface, name string) error {
+	ns := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name": name,
+			"labels": map[string]interface{}{
+				"app.kubernetes.io/name": "early-watch",
+			},
+			"annotations": map[string]interface{}{
+				CreatedByAnnotation: managedByValue,
+			},
+		},
+	}}
+
+	_, err := dynClient.Resource(namespaceGVR).Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil {
+		if kerrors.IsAlreadyExists(err) {
+			fmt.Printf("Namespace %q already exists, skipping creation\n", name)
+			return nil
+		}
+		return fmt.Errorf("creating namespace %q: %w", name, err)
+	}
+	fmt.Printf("Created Namespace %q\n", name)
 	return nil
 }
 
