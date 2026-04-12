@@ -63,7 +63,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;AnnotationCheck;CheckLock;ManualTouchCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck;AnnotationCheck;CheckLock;ManualTouchCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -85,6 +85,14 @@ type GuardRule struct {
 	// Required when Type is NameReferenceCheck.
 	// +optional
 	NameReferenceCheck *NameReferenceCheck `json:"nameReferenceCheck,omitempty"`
+
+	// ApprovalCheck verifies that the resource carries a valid approval
+	// annotation signed with the private key corresponding to the configured
+	// public key.  The annotation value must be the base64-encoded RSA
+	// signature of the resource's full path.
+	// Required when Type is ApprovalCheck.
+	// +optional
+	ApprovalCheck *ApprovalCheck `json:"approvalCheck,omitempty"`
 
 	// AnnotationCheck denies the request when the subject resource does not
 	// carry a required annotation (with an optional specific value).  Use
@@ -122,7 +130,6 @@ type AnnotationCheck struct {
 	AnnotationValue *string `json:"annotationValue,omitempty"`
 }
 
-
 // LockAnnotation is the annotation key that, when present on a resource,
 // prevents it from being deleted.  Any non-empty annotation value is treated
 // as a lock.
@@ -144,12 +151,16 @@ const (
 	// is referenced by name in other cluster resources.
 	RuleTypeNameReferenceCheck RuleType = "NameReferenceCheck"
 
+	// RuleTypeApprovalCheck denies the request unless the resource carries
+	// a valid approval annotation whose value is the resource path signed
+	// with the private key corresponding to the configured public key.
+	RuleTypeApprovalCheck RuleType = "ApprovalCheck"
+
 	// RuleTypeAnnotationCheck denies the request when the subject resource
 	// does not have a required annotation (with an optional specific value).
 	// Use this to implement a "confirm delete" pattern where a resource can
 	// only be deleted after the operator adds a designated annotation.
 	RuleTypeAnnotationCheck RuleType = "AnnotationCheck"
-
 
 	// RuleTypeCheckLock denies a DELETE request when the subject resource
 	// carries the earlywatch.io/lock annotation.
@@ -299,4 +310,28 @@ type ManualTouchCheck struct {
 	// stored.  Defaults to "early-watch-system" when omitted.
 	// +optional
 	EventNamespace string `json:"eventNamespace,omitempty"`
+}
+
+// ApprovalCheck configures a rule that requires the resource to carry a valid
+// approval annotation before a change (typically a DELETE) is permitted.
+// The annotation value must be the base64-encoded RSA-PSS SHA-256 signature
+// of the resource's canonical path, signed with the private key that
+// corresponds to PublicKey.
+//
+// The canonical path is computed as:
+//
+//	<group>/<version>/namespaces/<namespace>/<resource>/<name>   (namespaced)
+//	<group>/<version>/<resource>/<name>                          (cluster-scoped)
+//
+// The annotation key defaults to "earlywatch.io/approved".
+type ApprovalCheck struct {
+	// PublicKey is the PEM-encoded RSA public key (PKIX/SubjectPublicKeyInfo
+	// format) used to verify the approval signature.
+	PublicKey string `json:"publicKey"`
+
+	// AnnotationKey is the annotation on the resource whose value holds the
+	// base64-encoded approval signature.
+	// Defaults to "earlywatch.io/approved".
+	// +optional
+	AnnotationKey string `json:"annotationKey,omitempty"`
 }

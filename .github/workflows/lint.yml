@@ -1,4 +1,4 @@
-name: Unit Tests
+name: Lint
 
 on:
   push:
@@ -7,15 +7,15 @@ on:
     branches: [main]
 
 jobs:
-  unit-tests:
-    name: Run unit tests
+  lint:
+    name: Run golangci-lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -23,5 +23,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run unit tests
-        run: go test ./pkg/... -v -count=1
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+          args: --config .golangci.yml ./...

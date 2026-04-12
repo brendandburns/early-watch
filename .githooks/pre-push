@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pre-push hook: run golangci-lint before pushing to the remote.
+set -euo pipefail
+
+if ! command -v golangci-lint &>/dev/null; then
+  echo "golangci-lint not found. Run scripts/install-hooks.sh to set up the dev environment." >&2
+  exit 1
+fi
+
+echo "Running golangci-lint before push..."
+golangci-lint run --config .golangci.yml ./...
