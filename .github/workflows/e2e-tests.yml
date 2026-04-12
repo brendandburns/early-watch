@@ -27,7 +27,9 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
       - name: Build watchctl
-        run: go build -o /usr/local/bin/watchctl ./cmd/watchctl
+        run: |
+          mkdir -p ./bin
+          go build -o ./bin/watchctl ./cmd/watchctl
 
       - name: Run e2e tests
         run: |
