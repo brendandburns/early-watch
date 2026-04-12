@@ -38,4 +38,3 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: /language:go
-          upload: never
