@@ -20,13 +20,14 @@ var defaultUserAgentPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`^kubectl/`),
 }
 
-// monitoredVerbs is the set of HTTP verbs (lower-cased) that can constitute
-// a manual touch.
+// monitoredVerbs is the set of Kubernetes audit verbs (lower-cased) that can
+// constitute a manual touch.
 var monitoredVerbs = map[string]ewv1alpha1.MonitorOperationType{
-	"delete": ewv1alpha1.MonitorOperationDelete,
-	"create": ewv1alpha1.MonitorOperationCreate,
-	"update": ewv1alpha1.MonitorOperationUpdate,
-	"patch":  ewv1alpha1.MonitorOperationUpdate, // PATCH maps to UPDATE
+	"delete":           ewv1alpha1.MonitorOperationDelete,
+	"deletecollection": ewv1alpha1.MonitorOperationDelete, // DELETECOLLECTION maps to DELETE
+	"create":           ewv1alpha1.MonitorOperationCreate,
+	"update":           ewv1alpha1.MonitorOperationUpdate,
+	"patch":            ewv1alpha1.MonitorOperationUpdate, // PATCH maps to UPDATE
 }
 
 // TouchRecord holds the information needed to create a ManualTouchEvent.
