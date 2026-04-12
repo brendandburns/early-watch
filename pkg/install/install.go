@@ -34,10 +34,10 @@ const defaultWebhookImage = "early-watch:latest"
 // fieldManager is the field manager name used for Server-Side Apply.
 const fieldManager = "watchctl"
 
-// ManagedByAnnotation is the annotation key written onto every resource
+// CreatedByAnnotation is the annotation key written onto every resource
 // applied by "watchctl install". Its value identifies the tool that created
 // the resource, making it easy to list or delete all managed resources later.
-const ManagedByAnnotation = "earlywatch.io/created-by"
+const CreatedByAnnotation = "earlywatch.io/created-by"
 
 // managedByValue is the value written to ManagedByAnnotation.
 const managedByValue = "watchctl"
@@ -138,7 +138,7 @@ func applyManifest(
 
 		// Stamp every resource with the managed-by annotation so it can be
 		// identified and removed later.
-		injectAnnotation(obj, ManagedByAnnotation, managedByValue)
+		injectAnnotation(obj, CreatedByAnnotation, managedByValue)
 
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
