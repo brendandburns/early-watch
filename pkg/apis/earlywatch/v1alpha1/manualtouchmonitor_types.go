@@ -66,12 +66,6 @@ const (
 
 // AlertingConfig holds optional notification sink configuration.
 type AlertingConfig struct {
-	// SlackWebhookURL is a Slack incoming-webhook URL.  When set, the
-	// audit monitor POSTs a message to this URL for every detected manual
-	// touch.
-	// +optional
-	SlackWebhookURL string `json:"slackWebhookURL,omitempty"`
-
 	// PrometheusLabels is an optional set of static labels that are added
 	// to the earlywatch_manual_touch_total Prometheus counter for events
 	// detected by this monitor.

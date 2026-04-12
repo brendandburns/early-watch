@@ -35,7 +35,3 @@ spec:
   # Adjust the name to match your cluster's CI/CD service account.
   excludeServiceAccounts:
     - "system:serviceaccount:ci-system:pipeline-bot"
-
-  # Optional: Send a Slack message for every detected manual touch.
-  # alerting:
-  #   slackWebhookURL: "https://hooks.slack.com/services/T.../B.../..."

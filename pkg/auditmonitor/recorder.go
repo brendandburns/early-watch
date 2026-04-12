@@ -1,14 +1,11 @@
 package auditmonitor
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
-	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -59,9 +56,12 @@ func (r *TouchRecorder) Record(ctx context.Context, touch TouchRecord) error {
 	event := touch.Event
 	op := string(touch.Operation)
 
-	// Build a deterministic name from auditID so duplicate deliveries are
-	// idempotent (the Create will fail with AlreadyExists on retry).
-	name := sanitizeName("mte-" + event.AuditID)
+	// Build a deterministic name from auditID + monitor identity so:
+	//   1. Duplicate deliveries of the same event to the same monitor are
+	//      idempotent (AlreadyExists on retry).
+	//   2. Multiple monitors matching the same event each produce their own
+	//      ManualTouchEvent (fanout).
+	name := sanitizeName("mte-" + event.AuditID + "-" + touch.MonitorNamespace + "-" + touch.MonitorName)
 
 	mte := &ewv1alpha1.ManualTouchEvent{
 		TypeMeta: metav1.TypeMeta{
@@ -97,7 +97,7 @@ func (r *TouchRecorder) Record(ctx context.Context, touch TouchRecord) error {
 
 	if err := r.Client.Create(ctx, mte); err != nil {
 		// Ignore AlreadyExists — idempotent retry.
-		if isAlreadyExists(err) {
+		if apierrors.IsAlreadyExists(err) {
 			return nil
 		}
 		return fmt.Errorf("creating ManualTouchEvent: %w", err)
@@ -110,78 +110,6 @@ func (r *TouchRecorder) Record(ctx context.Context, touch TouchRecord) error {
 		"resource", event.ObjectRef.Resource,
 		"resourceName", event.ObjectRef.Name,
 	)
-
-	// Send alerts (best-effort; errors are logged, not returned).
-	if err := r.sendAlerts(ctx, touch, mte); err != nil {
-		logger.Error(err, "Failed to send alert for ManualTouchEvent", "name", name)
-	}
-
-	return nil
-}
-
-// sendAlerts dispatches notifications to any configured alerting sinks for the
-// monitor that generated this touch record.
-func (r *TouchRecorder) sendAlerts(ctx context.Context, touch TouchRecord, mte *ewv1alpha1.ManualTouchEvent) error {
-	// Fetch the originating monitor to read its alerting config.
-	monitor := &ewv1alpha1.ManualTouchMonitor{}
-	if err := r.Client.Get(ctx, client.ObjectKey{
-		Name:      touch.MonitorName,
-		Namespace: touch.MonitorNamespace,
-	}, monitor); err != nil {
-		return fmt.Errorf("fetching ManualTouchMonitor %s/%s: %w",
-			touch.MonitorNamespace, touch.MonitorName, err)
-	}
-
-	if monitor.Spec.Alerting == nil {
-		return nil
-	}
-
-	if monitor.Spec.Alerting.SlackWebhookURL != "" {
-		if err := sendSlackAlert(ctx, monitor.Spec.Alerting.SlackWebhookURL, mte); err != nil {
-			return fmt.Errorf("sending Slack alert: %w", err)
-		}
-	}
-
-	return nil
-}
-
-// sendSlackAlert POSTs a simple Slack message to the configured incoming
-// webhook URL.
-func sendSlackAlert(ctx context.Context, webhookURL string, mte *ewv1alpha1.ManualTouchEvent) error {
-	spec := mte.Spec
-	msg := fmt.Sprintf(
-		":warning: *Manual touch detected* — "+
-			"user *%s* performed *%s* on `%s/%s` (namespace: `%s`) via `%s`",
-		spec.User,
-		spec.Operation,
-		spec.Resource,
-		spec.ResourceName,
-		spec.ResourceNamespace,
-		spec.UserAgent,
-	)
-
-	payload := map[string]string{"text": msg}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshalling Slack payload: %w", err)
-	}
-
-	httpClient := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("building Slack request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("POSTing to Slack: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("Slack returned non-2xx status: %d", resp.StatusCode)
-	}
 
 	return nil
 }
@@ -204,10 +132,4 @@ func sanitizeName(s string) string {
 		result = result[:253]
 	}
 	return result
-}
-
-// isAlreadyExists returns true when the error indicates a resource already
-// exists.  This avoids importing k8s.io/apimachinery/pkg/api/errors directly.
-func isAlreadyExists(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "already exists")
 }

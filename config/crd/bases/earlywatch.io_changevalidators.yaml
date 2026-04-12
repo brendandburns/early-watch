@@ -173,6 +173,7 @@ spec:
                           - ApprovalCheck
                           - AnnotationCheck
                           - CheckLock
+                          - ManualTouchCheck
                       message:
                         description: >
                           Message is the human-readable denial message
@@ -356,6 +357,27 @@ spec:
                               AnnotationValue, if specified, is the exact value
                               that the annotation must have. When omitted, any
                               value is accepted as long as the key is present.
+                            type: string
+                      manualTouchCheck:
+                        description: >
+                          ManualTouchCheck denies the request when a recent
+                          manual touch (kubectl operation) has been recorded for
+                          the same resource within a configurable look-back
+                          window. Required when type is ManualTouchCheck.
+                        type: object
+                        properties:
+                          windowDuration:
+                            description: >
+                              WindowDuration is the look-back period used to
+                              search for recent manual touch events. The value
+                              must be a Go duration string, e.g. "30m", "2h".
+                              Defaults to "1h" when omitted.
+                            type: string
+                          eventNamespace:
+                            description: >
+                              EventNamespace is the namespace where
+                              ManualTouchEvent resources are stored. Defaults
+                              to "early-watch-system" when omitted.
                             type: string
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.

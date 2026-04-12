@@ -44,20 +44,15 @@ func TestAlertingConfig_DeepCopy_NilSafe(t *testing.T) {
 
 func TestAlertingConfig_DeepCopy(t *testing.T) {
 	original := &AlertingConfig{
-		SlackWebhookURL: "https://hooks.slack.com/services/T/B/X",
 		PrometheusLabels: map[string]string{
 			"env":  "prod",
 			"team": "platform",
 		},
 	}
 	copied := original.DeepCopy()
-	copied.SlackWebhookURL = "changed"
 	copied.PrometheusLabels["env"] = "staging"
 	copied.PrometheusLabels["new"] = "label"
 
-	if original.SlackWebhookURL != "https://hooks.slack.com/services/T/B/X" {
-		t.Error("DeepCopy shared SlackWebhookURL with original")
-	}
 	if original.PrometheusLabels["env"] != "prod" {
 		t.Error("DeepCopy shared PrometheusLabels map with original")
 	}
@@ -67,7 +62,7 @@ func TestAlertingConfig_DeepCopy(t *testing.T) {
 }
 
 func TestAlertingConfig_DeepCopy_NilLabels(t *testing.T) {
-	original := &AlertingConfig{SlackWebhookURL: "url", PrometheusLabels: nil}
+	original := &AlertingConfig{PrometheusLabels: nil}
 	copied := original.DeepCopy()
 	if copied.PrometheusLabels != nil {
 		t.Error("DeepCopy should preserve nil PrometheusLabels")
@@ -128,7 +123,7 @@ func TestManualTouchMonitorSpec_DeepCopy(t *testing.T) {
 		Operations:             []MonitorOperationType{MonitorOperationDelete},
 		UserAgentPatterns:      []string{`^kubectl/`},
 		ExcludeServiceAccounts: []string{"system:serviceaccount:ci:bot"},
-		Alerting:               &AlertingConfig{SlackWebhookURL: "url"},
+		Alerting:               &AlertingConfig{},
 	}
 
 	copied := original.DeepCopy()
@@ -138,7 +133,6 @@ func TestManualTouchMonitorSpec_DeepCopy(t *testing.T) {
 	copied.Operations = append(copied.Operations, MonitorOperationCreate)
 	copied.UserAgentPatterns[0] = "changed"
 	copied.ExcludeServiceAccounts[0] = "other"
-	copied.Alerting.SlackWebhookURL = "changed"
 
 	if original.Subjects[0].Resource != "services" {
 		t.Error("DeepCopy shared Subjects with original")
@@ -151,9 +145,6 @@ func TestManualTouchMonitorSpec_DeepCopy(t *testing.T) {
 	}
 	if original.ExcludeServiceAccounts[0] != "system:serviceaccount:ci:bot" {
 		t.Error("DeepCopy shared ExcludeServiceAccounts with original")
-	}
-	if original.Alerting.SlackWebhookURL != "url" {
-		t.Error("DeepCopy shared Alerting with original")
 	}
 }
 

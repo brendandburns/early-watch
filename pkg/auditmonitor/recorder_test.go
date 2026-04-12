@@ -2,7 +2,6 @@ package auditmonitor
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -12,28 +11,6 @@ import (
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 )
-
-// ---- isAlreadyExists ----
-
-func TestIsAlreadyExists_True(t *testing.T) {
-	err := fmt.Errorf("resource already exists")
-	if !isAlreadyExists(err) {
-		t.Error("expected true for 'already exists' error")
-	}
-}
-
-func TestIsAlreadyExists_False(t *testing.T) {
-	err := fmt.Errorf("some other error")
-	if isAlreadyExists(err) {
-		t.Error("expected false for unrelated error")
-	}
-}
-
-func TestIsAlreadyExists_Nil(t *testing.T) {
-	if isAlreadyExists(nil) {
-		t.Error("expected false for nil error")
-	}
-}
 
 // ---- namespaceMatchesSelector ----
 
