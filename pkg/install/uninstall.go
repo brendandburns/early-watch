@@ -32,7 +32,7 @@ type UninstallOptions struct {
 // described by opts.Kubeconfig, printing progress to stdout.  Resources are
 // deleted in reverse manifest order so that higher-level objects (e.g. the
 // ValidatingWebhookConfiguration) are removed before lower-level ones (e.g.
-// the CRD), minimising the window during which the webhook could intercept
+// the CRD), minimizing the window during which the webhook could intercept
 // its own teardown.  Resources that no longer exist are silently skipped.
 func Uninstall(opts UninstallOptions) error {
 	cfg, err := buildRESTConfig(opts.Kubeconfig)
@@ -99,10 +99,15 @@ func Uninstall(opts UninstallOptions) error {
 
 			mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 			if err != nil {
-				// The resource type may not be registered on the target cluster;
-				// skip it so that a partial installation can still be cleaned up.
-				fmt.Printf("Skipping %s %q (resource type not available in cluster)\n", gvk.Kind, obj.GetName())
-				continue
+				// Skip only when the kind is genuinely not registered in the
+				// cluster's discovery so that partial installations can still
+				// be cleaned up.  Any other error (e.g., auth or network)
+				// is surfaced to the caller.
+				if meta.IsNoMatchError(err) {
+					fmt.Printf("Skipping %s %q (resource type not available in cluster)\n", gvk.Kind, obj.GetName())
+					continue
+				}
+				return fmt.Errorf("resolving REST mapping for %s %q: %w", gvk.Kind, resourceDisplayName(obj), err)
 			}
 
 			resources = append(resources, resourceRef{obj: obj, mapping: mapping})

@@ -729,13 +729,15 @@ func writeTestKubeconfig(t *testing.T) string {
 	return path
 }
 
-// TestInstallUninstall is placed last so that the ValidatingWebhookConfiguration
-// created by install does not slow down the earlier tests (the webhook service
-// it points to does not exist in the test cluster, so every admission request
-// would have to wait for the 10-second timeout before being ignored).
+// TestZZZInstallUninstall is intentionally named to sort late in `go test`
+// execution (go test orders by name alphabetically) so the
+// ValidatingWebhookConfiguration created by install does not slow down other
+// tests. In envtest the Service/Deployment won't be reachable/scheduled, so
+// admission requests would have to wait for the 10-second timeout before
+// being ignored by the failurePolicy.
 //
 // The test verifies the full install → assert → uninstall → assert cycle.
-func TestInstallUninstall(t *testing.T) {
+func TestZZZInstallUninstall(t *testing.T) {
 	kubeconfig := writeTestKubeconfig(t)
 	ctx := context.Background()
 
@@ -764,15 +766,34 @@ func TestInstallUninstall(t *testing.T) {
 		t.Fatalf("uninstall failed: %v", err)
 	}
 
-	// Verify the ClusterRole was deleted.
-	role = &rbacv1.ClusterRole{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-role"}, role); !kerrors.IsNotFound(err) {
-		t.Fatalf("expected ClusterRole early-watch-role to be absent after uninstall, got: %v", err)
+	// Poll until the ClusterRole is gone (delete is asynchronous / may have
+	// a finalizer-driven delay).
+	deadline := time.Now().Add(10 * time.Second)
+	var roleGone bool
+	for time.Now().Before(deadline) {
+		role = &rbacv1.ClusterRole{}
+		if kerrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-role"}, role)) {
+			roleGone = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !roleGone {
+		t.Fatalf("expected ClusterRole early-watch-role to be absent after uninstall")
 	}
 
-	// Verify the ClusterRoleBinding was deleted.
-	crb := &rbacv1.ClusterRoleBinding{}
-	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-rolebinding"}, crb); !kerrors.IsNotFound(err) {
-		t.Fatalf("expected ClusterRoleBinding early-watch-rolebinding to be absent after uninstall, got: %v", err)
+	// Poll until the ClusterRoleBinding is gone.
+	var crbGone bool
+	deadline = time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		crb := &rbacv1.ClusterRoleBinding{}
+		if kerrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-rolebinding"}, crb)) {
+			crbGone = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !crbGone {
+		t.Fatalf("expected ClusterRoleBinding early-watch-rolebinding to be absent after uninstall")
 	}
 }

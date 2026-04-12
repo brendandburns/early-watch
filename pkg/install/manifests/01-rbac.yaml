@@ -1,4 +1,12 @@
 ---
+# Namespace for all EarlyWatch system resources.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: early-watch-system
+  labels:
+    app.kubernetes.io/name: early-watch
+---
 # ClusterRole grants the webhook server the permissions it needs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
