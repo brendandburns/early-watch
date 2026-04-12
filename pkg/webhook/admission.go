@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
+	"github.com/brendandburns/early-watch/pkg/auditmonitor"
 )
 
 // AdmissionHandler handles admission webhook requests by evaluating
@@ -646,15 +647,15 @@ func (h *AdmissionHandler) evaluateManualTouchCheck(
 
 	eventNamespace := check.EventNamespace
 	if eventNamespace == "" {
-		eventNamespace = "early-watch-system"
+		eventNamespace = auditmonitor.DefaultEventNamespace
 	}
 
 	// List ManualTouchEvents for this resource using label selectors.
 	labelSel := labels.SelectorFromSet(labels.Set{
-		"earlywatch.io/resource":           req.Resource.Resource,
-		"earlywatch.io/resource-namespace": req.Namespace,
-		"earlywatch.io/resource-name":      req.Name,
-		"earlywatch.io/api-group":          req.Resource.Group,
+		auditmonitor.LabelResource:          req.Resource.Resource,
+		auditmonitor.LabelResourceNamespace: req.Namespace,
+		auditmonitor.LabelResourceName:      req.Name,
+		auditmonitor.LabelAPIGroup:          req.Resource.Group,
 	})
 
 	mteList := &ewv1alpha1.ManualTouchEventList{}

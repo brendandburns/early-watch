@@ -5,47 +5,69 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 )
 
+// buildTestScheme builds a scheme with both earlywatch and core types.
+func buildTestScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	_ = ewv1alpha1.AddToScheme(s)
+	_ = clientgoscheme.AddToScheme(s)
+	return s
+}
+
+// makeNamespace returns a Namespace with the given labels.
+func makeNamespace(name string, lbls map[string]string) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: lbls,
+		},
+	}
+}
+
 // ---- namespaceMatchesSelector ----
 
 func TestNamespaceMatchesSelector_NilSelector(t *testing.T) {
-	if !namespaceMatchesSelector("default", nil) {
+	d := &TouchDetector{Client: clientfake.NewClientBuilder().WithScheme(buildTestScheme()).Build()}
+	if !d.namespaceMatchesSelector(context.Background(), "default", nil) {
 		t.Error("nil selector should match any namespace")
 	}
 }
 
 func TestNamespaceMatchesSelector_EmptySelector(t *testing.T) {
+	d := &TouchDetector{Client: clientfake.NewClientBuilder().WithScheme(buildTestScheme()).Build()}
 	sel := &metav1.LabelSelector{}
-	if !namespaceMatchesSelector("default", sel) {
+	if !d.namespaceMatchesSelector(context.Background(), "default", sel) {
 		t.Error("empty selector should match any namespace")
 	}
 }
 
-func TestNamespaceMatchesSelector_MatchLabelsContainsKey(t *testing.T) {
-	sel := &metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			"default": "allowed",
-		},
+func TestNamespaceMatchesSelector_MatchLabelsMatches(t *testing.T) {
+	ns := makeNamespace("default", map[string]string{"env": "prod"})
+	d := &TouchDetector{
+		Client: clientfake.NewClientBuilder().WithScheme(buildTestScheme()).WithObjects(ns).Build(),
 	}
-	if !namespaceMatchesSelector("default", sel) {
-		t.Error("selector with namespace as key should match")
+	sel := &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}}
+	if !d.namespaceMatchesSelector(context.Background(), "default", sel) {
+		t.Error("selector should match namespace with matching labels")
 	}
 }
 
-func TestNamespaceMatchesSelector_MatchLabelsMissingKey(t *testing.T) {
-	sel := &metav1.LabelSelector{
-		MatchLabels: map[string]string{
-			"production": "allowed",
-		},
+func TestNamespaceMatchesSelector_MatchLabelsNoMatch(t *testing.T) {
+	ns := makeNamespace("default", map[string]string{"env": "dev"})
+	d := &TouchDetector{
+		Client: clientfake.NewClientBuilder().WithScheme(buildTestScheme()).WithObjects(ns).Build(),
 	}
-	if namespaceMatchesSelector("default", sel) {
-		t.Error("selector without namespace key should not match")
+	sel := &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}}
+	if d.namespaceMatchesSelector(context.Background(), "default", sel) {
+		t.Error("selector should not match namespace with different labels")
 	}
 }
 

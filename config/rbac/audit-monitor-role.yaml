@@ -17,15 +17,6 @@ rules:
       - get
       - list
       - watch
-  # Update ManualTouchMonitor status (touchesDetected counter).
-  - apiGroups:
-      - earlywatch.io
-    resources:
-      - manualtouchmonitors/status
-    verbs:
-      - get
-      - patch
-      - update
   # Create ManualTouchEvent records when a manual touch is detected.
   - apiGroups:
       - earlywatch.io
@@ -34,17 +25,13 @@ rules:
     verbs:
       - create
       - get
-      - list
-      - watch
-      - delete
-  # Allow recording Kubernetes events.
+  # Allow reading Namespace objects to evaluate namespaceSelector.
   - apiGroups:
       - ""
     resources:
-      - events
+      - namespaces
     verbs:
-      - create
-      - patch
+      - get
 ---
 # ServiceAccount for the audit monitor.
 apiVersion: v1

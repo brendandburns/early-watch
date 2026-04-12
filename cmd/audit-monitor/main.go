@@ -8,9 +8,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -85,10 +89,40 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	setupLog.Info("Starting EarlyWatch audit monitor", "address", listenAddr)
-	if err := http.ListenAndServe(listenAddr, mux); err != nil {
-		setupLog.Error(err, "Audit monitor server exited")
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:              listenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Start the server in a goroutine so we can handle SIGTERM gracefully.
+	serverErr := make(chan error, 1)
+	go func() {
+		setupLog.Info("Starting EarlyWatch audit monitor", "address", listenAddr)
+		serverErr <- srv.ListenAndServe()
+	}()
+
+	// Wait for a shutdown signal or server error.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErr:
+		if err != nil && err != http.ErrServerClosed {
+			setupLog.Error(err, "Audit monitor server exited with error")
+			os.Exit(1)
+		}
+	case sig := <-quit:
+		setupLog.Info("Received shutdown signal", "signal", sig)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "Graceful shutdown failed")
+			os.Exit(1)
+		}
 	}
 }
 

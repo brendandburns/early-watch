@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -30,6 +34,36 @@ var monitoredVerbs = map[string]ewv1alpha1.MonitorOperationType{
 	"patch":            ewv1alpha1.MonitorOperationUpdate, // PATCH maps to UPDATE
 }
 
+// patternCacheKey uniquely identifies a compiled pattern set for a monitor.
+type patternCacheKey struct {
+	name       string
+	namespace  string
+	generation int64
+}
+
+// namespaceCacheEntry stores the labels for a Namespace with an expiry time.
+type namespaceCacheEntry struct {
+	labels    map[string]string
+	expiresAt time.Time
+}
+
+// namespaceCacheTTL is how long a cached namespace entry is considered fresh.
+const namespaceCacheTTL = 30 * time.Second
+
+// patternCacheEntry stores the compiled result for a monitor's patterns.
+// valid is false when all configured patterns were invalid.
+type patternCacheEntry struct {
+	patterns []*regexp.Regexp
+	valid    bool
+}
+
+// patternCache caches compiled regexp slices keyed by monitor identity +
+// generation so patterns are only recompiled when the monitor spec changes.
+var (
+	patternCacheMu sync.RWMutex
+	patternCache   = map[patternCacheKey]patternCacheEntry{}
+)
+
 // TouchRecord holds the information needed to create a ManualTouchEvent.
 type TouchRecord struct {
 	Event            *AuditEvent
@@ -42,6 +76,11 @@ type TouchRecord struct {
 // resources in the cluster and returns a TouchRecord for every match.
 type TouchDetector struct {
 	Client client.Client
+
+	// nsCache is an in-process cache of namespace labels keyed by namespace name.
+	// Guarded by nsCacheMu.
+	nsCache   map[string]namespaceCacheEntry
+	nsCacheMu sync.RWMutex
 }
 
 // Detect evaluates a single audit event against all ManualTouchMonitor
@@ -66,7 +105,7 @@ func (d *TouchDetector) Detect(ctx context.Context, event *AuditEvent) ([]TouchR
 	for i := range monitorList.Items {
 		monitor := &monitorList.Items[i]
 
-		if !monitorMatchesEvent(monitor, event, op) {
+		if !d.monitorMatchesEvent(ctx, monitor, event, op) {
 			continue
 		}
 
@@ -91,7 +130,8 @@ func (d *TouchDetector) Detect(ctx context.Context, event *AuditEvent) ([]TouchR
 // monitorMatchesEvent returns true when the audit event matches the monitor's
 // configured subjects, operations, user-agent patterns, and service-account
 // exclusions.
-func monitorMatchesEvent(
+func (d *TouchDetector) monitorMatchesEvent(
+	ctx context.Context,
 	monitor *ewv1alpha1.ManualTouchMonitor,
 	event *AuditEvent,
 	op ewv1alpha1.MonitorOperationType,
@@ -101,8 +141,12 @@ func monitorMatchesEvent(
 		return false
 	}
 
-	// Check user-agent.
-	patterns := compilePatterns(monitor.Spec.UserAgentPatterns)
+	// Check user-agent using cached compiled patterns.
+	patterns, ok := cachedPatterns(monitor)
+	if !ok {
+		// All configured patterns were invalid — treat as non-matching.
+		return false
+	}
 	if !userAgentMatches(event.UserAgent, patterns) {
 		return false
 	}
@@ -114,7 +158,7 @@ func monitorMatchesEvent(
 
 	// Check subjects.
 	for _, subj := range monitor.Spec.Subjects {
-		if subjectMatchesEvent(subj, event) {
+		if d.subjectMatchesEvent(ctx, subj, event) {
 			return true
 		}
 	}
@@ -132,25 +176,56 @@ func operationMatches(ops []ewv1alpha1.MonitorOperationType, op ewv1alpha1.Monit
 	return false
 }
 
-// compilePatterns compiles a slice of regex strings.  When patterns is empty
-// the default kubectl pattern is returned.  Patterns that fail to compile are
-// silently skipped.
-func compilePatterns(patterns []string) []*regexp.Regexp {
-	if len(patterns) == 0 {
-		return defaultUserAgentPatterns
+// cachedPatterns returns the compiled regexp slice for the monitor, building
+// and caching it when necessary.  The second return value is false when all
+// configured patterns are invalid (the caller should treat the monitor as
+// non-matching until the configuration is corrected).
+func cachedPatterns(monitor *ewv1alpha1.ManualTouchMonitor) ([]*regexp.Regexp, bool) {
+	// No patterns configured — use the default kubectl pattern.
+	if len(monitor.Spec.UserAgentPatterns) == 0 {
+		return defaultUserAgentPatterns, true
 	}
-	compiled := make([]*regexp.Regexp, 0, len(patterns))
-	for _, p := range patterns {
+
+	key := patternCacheKey{
+		name:       monitor.Name,
+		namespace:  monitor.Namespace,
+		generation: monitor.Generation,
+	}
+
+	// Fast path: check cache with read lock.
+	patternCacheMu.RLock()
+	if entry, hit := patternCache[key]; hit {
+		patternCacheMu.RUnlock()
+		return entry.patterns, entry.valid
+	}
+	patternCacheMu.RUnlock()
+
+	// Slow path: compile and cache with write lock.
+	patternCacheMu.Lock()
+	defer patternCacheMu.Unlock()
+
+	// Re-check after acquiring write lock (another goroutine may have populated it).
+	if entry, hit := patternCache[key]; hit {
+		return entry.patterns, entry.valid
+	}
+
+	compiled := make([]*regexp.Regexp, 0, len(monitor.Spec.UserAgentPatterns))
+	for _, p := range monitor.Spec.UserAgentPatterns {
 		re, err := regexp.Compile(p)
 		if err != nil {
 			continue
 		}
 		compiled = append(compiled, re)
 	}
+
 	if len(compiled) == 0 {
-		return defaultUserAgentPatterns
+		// All patterns were invalid — store explicit invalid entry.
+		patternCache[key] = patternCacheEntry{patterns: nil, valid: false}
+		return nil, false
 	}
-	return compiled
+
+	patternCache[key] = patternCacheEntry{patterns: compiled, valid: true}
+	return compiled, true
 }
 
 // userAgentMatches returns true when the user agent matches at least one
@@ -176,7 +251,7 @@ func isExcluded(username string, exclusions []string) bool {
 
 // subjectMatchesEvent returns true when the monitor subject matches the
 // resource referenced in the audit event.
-func subjectMatchesEvent(subj ewv1alpha1.MonitorSubject, event *AuditEvent) bool {
+func (d *TouchDetector) subjectMatchesEvent(ctx context.Context, subj ewv1alpha1.MonitorSubject, event *AuditEvent) bool {
 	// Match API group.
 	if subj.APIGroup != event.ObjectRef.APIGroup {
 		return false
@@ -187,10 +262,9 @@ func subjectMatchesEvent(subj ewv1alpha1.MonitorSubject, event *AuditEvent) bool
 		return false
 	}
 
-	// NamespaceSelector is evaluated by listing namespace labels at
-	// detection time; for simplicity a nil selector matches all namespaces.
+	// Evaluate NamespaceSelector against the namespace's actual labels.
 	if subj.NamespaceSelector != nil {
-		if !namespaceMatchesSelector(event.ObjectRef.Namespace, subj.NamespaceSelector) {
+		if !d.namespaceMatchesSelector(ctx, event.ObjectRef.Namespace, subj.NamespaceSelector) {
 			return false
 		}
 	}
@@ -198,22 +272,63 @@ func subjectMatchesEvent(subj ewv1alpha1.MonitorSubject, event *AuditEvent) bool
 	return true
 }
 
-// namespaceMatchesSelector is a best-effort check: when MatchLabels is set it
-// verifies the namespace name is in the allowed set if names are provided via
-// a special convention.  In production this should query the cluster for the
-// namespace's labels and evaluate the full LabelSelector.
-//
-// For now, a nil or empty NamespaceSelector always matches, and a non-empty
-// MatchLabels causes the check to pass only when the namespace is explicitly
-// listed in MatchLabels as a key (a simple allow-list convention).
-func namespaceMatchesSelector(namespace string, sel *metav1.LabelSelector) bool {
+// namespaceMatchesSelector fetches the Namespace object (with a short-TTL
+// in-memory cache) and evaluates the LabelSelector against its labels,
+// implementing full Kubernetes label selector semantics (matchLabels +
+// matchExpressions).
+func (d *TouchDetector) namespaceMatchesSelector(ctx context.Context, namespace string, sel *metav1.LabelSelector) bool {
 	if sel == nil {
 		return true
 	}
 	if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
 		return true
 	}
-	// Simplified: if the namespace name is a key in MatchLabels, it matches.
-	_, ok := sel.MatchLabels[namespace]
-	return ok
+
+	// Convert the metav1.LabelSelector to a labels.Selector.
+	selector, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		// Invalid selector — treat as non-matching.
+		return false
+	}
+
+	nsLabels := d.namespaceLabels(ctx, namespace)
+	if nsLabels == nil {
+		return false
+	}
+
+	return selector.Matches(labels.Set(nsLabels))
+}
+
+// namespaceLabels returns the labels of the named Namespace, using a short-TTL
+// cache to avoid an API call for every audit event.  Returns nil on error.
+func (d *TouchDetector) namespaceLabels(ctx context.Context, namespace string) map[string]string {
+	now := time.Now()
+
+	// Fast path: read from cache.
+	d.nsCacheMu.RLock()
+	if d.nsCache != nil {
+		if entry, hit := d.nsCache[namespace]; hit && now.Before(entry.expiresAt) {
+			d.nsCacheMu.RUnlock()
+			return entry.labels
+		}
+	}
+	d.nsCacheMu.RUnlock()
+
+	// Slow path: fetch from API.
+	ns := &corev1.Namespace{}
+	if err := d.Client.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil {
+		return nil
+	}
+
+	d.nsCacheMu.Lock()
+	if d.nsCache == nil {
+		d.nsCache = make(map[string]namespaceCacheEntry)
+	}
+	d.nsCache[namespace] = namespaceCacheEntry{
+		labels:    ns.Labels,
+		expiresAt: now.Add(namespaceCacheTTL),
+	}
+	d.nsCacheMu.Unlock()
+
+	return ns.Labels
 }

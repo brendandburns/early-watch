@@ -75,6 +75,12 @@ type AuditEventHandler struct {
 	Recorder *TouchRecorder
 }
 
+// maxRequestBodyBytes is the maximum audit webhook payload size accepted by
+// the handler.  32 MiB is well above any realistic batch size (the API server
+// typically sends batches of a few hundred events), but still provides a
+// safeguard against memory exhaustion from misconfigured or malicious senders.
+const maxRequestBodyBytes = 32 << 20 // 32 MiB
+
 // ServeHTTP implements http.Handler.  The Kubernetes API server POSTs a JSON
 // EventList body to this endpoint for each audit batch.
 func (h *AuditEventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +90,8 @@ func (h *AuditEventHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 
 	var eventList AuditEventList
 	if err := json.NewDecoder(r.Body).Decode(&eventList); err != nil {

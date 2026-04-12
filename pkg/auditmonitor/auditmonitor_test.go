@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -200,10 +201,15 @@ func TestTouchDetector_PatchMapsToUpdate(t *testing.T) {
 	}
 }
 
-// ---- compilePatterns / userAgentMatches tests ----
+// ---- cachedPatterns / userAgentMatches tests ----
 
-func TestCompilePatterns_DefaultWhenEmpty(t *testing.T) {
-	patterns := compilePatterns(nil)
+func TestCachedPatterns_DefaultWhenEmpty(t *testing.T) {
+	monitor := makeMonitor("mon", "default")
+	monitor.Spec.UserAgentPatterns = nil
+	patterns, ok := cachedPatterns(monitor)
+	if !ok {
+		t.Fatal("expected ok=true for empty patterns (default)")
+	}
 	if !userAgentMatches("kubectl/v1.29.0 (linux/amd64)", patterns) {
 		t.Error("default pattern should match kubectl user-agent")
 	}
@@ -212,8 +218,13 @@ func TestCompilePatterns_DefaultWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestCompilePatterns_Custom(t *testing.T) {
-	patterns := compilePatterns([]string{`^helm/`})
+func TestCachedPatterns_Custom(t *testing.T) {
+	monitor := makeMonitor("mon-custom", "default")
+	monitor.Spec.UserAgentPatterns = []string{`^helm/`}
+	patterns, ok := cachedPatterns(monitor)
+	if !ok {
+		t.Fatal("expected ok=true for valid custom pattern")
+	}
 	if !userAgentMatches("helm/v3.12.0", patterns) {
 		t.Error("custom pattern should match helm user-agent")
 	}
@@ -222,11 +233,13 @@ func TestCompilePatterns_Custom(t *testing.T) {
 	}
 }
 
-func TestCompilePatterns_InvalidPatternFallback(t *testing.T) {
-	// An invalid regex should fall back to the default pattern.
-	patterns := compilePatterns([]string{`[invalid`})
-	if !userAgentMatches("kubectl/v1.29.0", patterns) {
-		t.Error("should fall back to default pattern when custom pattern is invalid")
+func TestCachedPatterns_InvalidPatternNonMatching(t *testing.T) {
+	// An invalid regex should cause ok=false (non-matching), not fall back to default.
+	monitor := makeMonitor("mon-invalid", "default")
+	monitor.Spec.UserAgentPatterns = []string{`[invalid`}
+	_, ok := cachedPatterns(monitor)
+	if ok {
+		t.Error("should return ok=false when all configured patterns are invalid")
 	}
 }
 
@@ -259,10 +272,15 @@ func TestSanitizeName_SpecialChars(t *testing.T) {
 }
 
 func TestSanitizeName_Truncation(t *testing.T) {
-	long := "a" + string(make([]byte, 300))
+	// Use a long string of valid characters so sanitizeName does not trim them
+	// away and we actually exercise the 253-character truncation path.
+	long := strings.Repeat("a", 300)
 	result := sanitizeName(long)
 	if len(result) > 253 {
 		t.Errorf("name too long: %d chars", len(result))
+	}
+	if len(result) != 253 {
+		t.Errorf("expected truncated length 253, got %d", len(result))
 	}
 }
 
