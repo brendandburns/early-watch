@@ -88,16 +88,17 @@ func Run(opts Options) error {
 		return err
 	}
 
-	PrintTable(opts.Output, list.Items)
-	return nil
+	return PrintTable(opts.Output, list.Items)
 }
 
 // PrintTable writes a human-readable table of ManualTouchEvents to w.
-func PrintTable(w io.Writer, events []ewv1alpha1.ManualTouchEvent) {
+func PrintTable(w io.Writer, events []ewv1alpha1.ManualTouchEvent) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAMESPACE\tNAME\tUSER\tOPERATION\tRESOURCE\tRESOURCE NAME\tAGE")
+	if _, err := fmt.Fprintln(tw, "NAMESPACE\tNAME\tUSER\tOPERATION\tRESOURCE\tRESOURCE NAME\tAGE"); err != nil {
+		return err
+	}
 	for _, e := range events {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			e.Namespace,
 			e.Name,
 			e.Spec.User,
@@ -105,9 +106,11 @@ func PrintTable(w io.Writer, events []ewv1alpha1.ManualTouchEvent) {
 			e.Spec.Resource,
 			e.Spec.ResourceName,
 			formatAge(time.Since(e.CreationTimestamp.Time)),
-		)
+		); err != nil {
+			return err
+		}
 	}
-	tw.Flush()
+	return tw.Flush()
 }
 
 // formatAge returns a short human-readable string representing d.

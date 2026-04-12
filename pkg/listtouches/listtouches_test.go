@@ -34,7 +34,9 @@ func makeEvent(name, namespace, user, operation, resource, resourceName string, 
 
 func TestPrintTable_EmptyList(t *testing.T) {
 	var buf bytes.Buffer
-	PrintTable(&buf, nil)
+	if err := PrintTable(&buf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	got := buf.String()
 	if !strings.Contains(got, "NAMESPACE") {
 		t.Errorf("expected header row, got: %q", got)
@@ -44,7 +46,9 @@ func TestPrintTable_EmptyList(t *testing.T) {
 func TestPrintTable_SingleEvent(t *testing.T) {
 	e := makeEvent("mte-1", "default", "admin", "DELETE", "services", "my-svc", 5*time.Minute)
 	var buf bytes.Buffer
-	PrintTable(&buf, []ewv1alpha1.ManualTouchEvent{e})
+	if err := PrintTable(&buf, []ewv1alpha1.ManualTouchEvent{e}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	got := buf.String()
 	for _, want := range []string{"default", "mte-1", "admin", "DELETE", "services", "my-svc"} {
 		if !strings.Contains(got, want) {
@@ -59,7 +63,9 @@ func TestPrintTable_MultipleEvents(t *testing.T) {
 		makeEvent("mte-2", "kube-system", "bob", "DELETE", "pods", "my-pod", 2*time.Hour),
 	}
 	var buf bytes.Buffer
-	PrintTable(&buf, events)
+	if err := PrintTable(&buf, events); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	got := buf.String()
 	for _, want := range []string{"alice", "bob", "CREATE", "DELETE", "app", "my-pod"} {
 		if !strings.Contains(got, want) {
