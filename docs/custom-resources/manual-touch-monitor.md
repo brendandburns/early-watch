@@ -116,5 +116,6 @@ Key fields:
 
 ## Full CRD Schema
 
-The generated CRD YAML is at:  
-[`config/crd/bases/earlywatch.io_changevalidators.yaml`](../../config/crd/bases/earlywatch.io_changevalidators.yaml)
+The generated CRD YAML files are at:  
+[`config/crd/bases/earlywatch.io_manualtouchmonitors.yaml`](../../config/crd/bases/earlywatch.io_manualtouchmonitors.yaml)  
+[`config/crd/bases/earlywatch.io_manualtouchevents.yaml`](../../config/crd/bases/earlywatch.io_manualtouchevents.yaml)
