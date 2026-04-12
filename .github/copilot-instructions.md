@@ -34,6 +34,6 @@ When reviewing pull requests, prioritize the following:
 Before opening or finalizing a pull request, always run the following commands locally and ensure they all pass:
 
 1. **Unit tests**: `go test ./pkg/... -v -count=1`
-2. **Formatting linters**: `golangci-lint run --config .golangci.yml ./...`
+2. **Linters**: `golangci-lint run --config .golangci.yml ./...`
 
 Do not submit a pull request if either of these commands reports failures or formatting issues.
