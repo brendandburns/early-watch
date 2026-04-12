@@ -5,6 +5,7 @@ on:
     workflows:
       - "Unit Tests"
       - "E2E Tests"
+      - "Lint"
     types:
       - completed
 
