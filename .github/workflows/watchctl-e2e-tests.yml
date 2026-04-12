@@ -43,6 +43,7 @@ jobs:
 
       - name: Build watchctl
         run: |
+          mkdir -p "$GITHUB_WORKSPACE/bin"
           go build -o "$GITHUB_WORKSPACE/bin/watchctl" ./cmd/watchctl
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
