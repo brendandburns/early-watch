@@ -28,6 +28,10 @@ var manifestsFS embed.FS
 // when no override is provided.
 const defaultWebhookImage = "early-watch:latest"
 
+// defaultAuditMonitorImage is the container image used by the audit-monitor
+// Deployment when no override is provided.
+const defaultAuditMonitorImage = "early-watch-audit-monitor:latest"
+
 // defaultNamespace is the Kubernetes namespace used for EarlyWatch resources
 // when no override is provided via Options.Namespace.
 const defaultNamespace = "early-watch-system"
@@ -54,6 +58,14 @@ type Options struct {
 	// Namespace is the Kubernetes namespace to install EarlyWatch into.
 	// Defaults to defaultNamespace ("early-watch-system") when empty.
 	Namespace string
+	// ManualTouchInstall, when true, additionally installs the audit-monitor
+	// CRDs, RBAC, Deployment, and Service required for manual touch monitoring.
+	// Defaults to false.
+	ManualTouchInstall bool
+	// AuditMonitorImage overrides the container image for the audit-monitor
+	// Deployment. Only used when ManualTouchInstall is true.
+	// Defaults to defaultAuditMonitorImage when empty.
+	AuditMonitorImage string
 }
 
 // Run applies all EarlyWatch infrastructure manifests to the cluster
@@ -64,6 +76,9 @@ func Run(opts Options) error {
 	}
 	if opts.Namespace == "" {
 		opts.Namespace = defaultNamespace
+	}
+	if opts.AuditMonitorImage == "" {
+		opts.AuditMonitorImage = defaultAuditMonitorImage
 	}
 
 	cfg, err := internalapply.BuildRESTConfig(opts.Kubeconfig)
@@ -92,30 +107,54 @@ func Run(opts Options) error {
 		return err
 	}
 
-	// Apply manifests in order: CRD first, then RBAC, then webhook resources.
-	entries, err := fs.ReadDir(manifestsFS, "manifests")
+	// Apply core manifests in order: CRD first, then RBAC, then webhook resources.
+	replacements := map[string]string{
+		defaultWebhookImage: opts.Image,
+		defaultNamespace:    opts.Namespace,
+	}
+	if err := applyManifestDir(ctx, dynClient, mapper, "manifests", replacements); err != nil {
+		return err
+	}
+
+	// Optionally apply manual touch monitoring manifests.
+	if opts.ManualTouchInstall {
+		mtReplacements := map[string]string{
+			defaultAuditMonitorImage: opts.AuditMonitorImage,
+			defaultNamespace:         opts.Namespace,
+		}
+		if err := applyManifestDir(ctx, dynClient, mapper, "manifests/manual-touch", mtReplacements); err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("EarlyWatch installation complete.")
+	return nil
+}
+
+// applyManifestDir reads all manifest files from dir within the embedded FS,
+// applies the given string replacements, and SSA-applies each manifest to the
+// cluster. The replacements map is applied only when the old value differs from
+// the new value.
+func applyManifestDir(ctx context.Context, dynClient dynamic.Interface, mapper *restmapper.DeferredDiscoveryRESTMapper, dir string, replacements map[string]string) error {
+	entries, err := fs.ReadDir(manifestsFS, dir)
 	if err != nil {
-		return fmt.Errorf("reading embedded manifests directory: %w", err)
+		return fmt.Errorf("reading embedded manifests directory %q: %w", dir, err)
 	}
 
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		path := "manifests/" + entry.Name()
+		path := dir + "/" + entry.Name()
 		data, err := manifestsFS.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("reading embedded manifest %q: %w", path, err)
 		}
 
-		// Optionally override the webhook image inside the deployment manifest.
-		if opts.Image != defaultWebhookImage {
-			data = bytes.ReplaceAll(data, []byte(defaultWebhookImage), []byte(opts.Image))
-		}
-		// Substitute namespace placeholder so all resource references point to
-		// the configured namespace.
-		if opts.Namespace != defaultNamespace {
-			data = bytes.ReplaceAll(data, []byte(defaultNamespace), []byte(opts.Namespace))
+		for oldVal, newVal := range replacements {
+			if oldVal != newVal {
+				data = bytes.ReplaceAll(data, []byte(oldVal), []byte(newVal))
+			}
 		}
 
 		if err := internalapply.Manifest(ctx, dynClient, mapper, data, entry.Name(), func(obj *unstructured.Unstructured) {
@@ -124,8 +163,6 @@ func Run(opts Options) error {
 			return err
 		}
 	}
-
-	fmt.Println("EarlyWatch installation complete.")
 	return nil
 }
 
