@@ -31,7 +31,7 @@ import (
 type AdmissionHandler struct {
 	Client        client.Client
 	DynamicClient dynamic.Interface
-	Decoder       *admission.Decoder
+	Decoder       admission.Decoder
 }
 
 // Handle is the main admission webhook entry point.  It is called by
