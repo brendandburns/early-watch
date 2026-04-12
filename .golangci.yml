@@ -1,0 +1,60 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - unconvert
+    - unparam
+    - exhaustive
+    - godot
+    - noctx
+    - prealloc
+    - revive
+    - whitespace
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/brendandburns/early-watch
+  misspell:
+    locale: US
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - checkPrivateReceivers
+          - sayRepetitiveInsteadOfStutters
+      - name: error-strings
+      - name: var-naming
+      - name: unexported-return
+      - name: indent-error-flow
+  godot:
+    scope: declarations
+    capital: false
+  exhaustive:
+    default-signifies-exhaustive: true
+
+issues:
+  exclude-rules:
+    # Exclude generated files from linting.
+    - path: zz_generated
+      linters:
+        - all
+    # Test files are allowed to use unexported helpers.
+    - path: _test\.go
+      linters:
+        - unparam
+        - revive
+  max-issues-per-linter: 0
+  max-same-issues: 0
