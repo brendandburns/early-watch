@@ -28,3 +28,12 @@ When reviewing pull requests, prioritize the following:
 - Follow standard Go conventions (`gofmt`, `go vet`).
 - Keep function signatures idiomatic; avoid returning multiple errors.
 - Exported types and functions must have doc comments.
+
+## Pre-PR Checklist
+
+Before opening or finalizing a pull request, always run the following commands locally and ensure they all pass:
+
+1. **Unit tests**: `go test ./pkg/... -v -count=1`
+2. **Linters**: `golangci-lint run --config .golangci.yml ./...`
+
+Do not submit a pull request if either of these commands reports failures or formatting issues.
