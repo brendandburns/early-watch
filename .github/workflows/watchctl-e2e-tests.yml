@@ -1,0 +1,116 @@
+name: watchctl CLI E2E Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/watchctl/**'
+      - 'pkg/install/**'
+      - 'pkg/add/**'
+      - 'pkg/approve/**'
+      - 'pkg/listtouches/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/watchctl-e2e-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/watchctl/**'
+      - 'pkg/install/**'
+      - 'pkg/add/**'
+      - 'pkg/approve/**'
+      - 'pkg/listtouches/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/watchctl-e2e-tests.yml'
+
+jobs:
+  watchctl-e2e:
+    name: Run watchctl CLI e2e tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build watchctl
+        run: |
+          go build -o "$GITHUB_WORKSPACE/bin/watchctl" ./cmd/watchctl
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.12.0
+
+      - name: Test watchctl install
+        run: watchctl install --kubeconfig "$HOME/.kube/config"
+
+      - name: Verify CRD was created
+        run: kubectl get crd changevalidators.earlywatch.io
+
+      - name: Verify namespace was created
+        run: kubectl get namespace early-watch-system
+
+      - name: Verify webhook Deployment was created
+        run: kubectl get deployment early-watch-webhook -n early-watch-system
+
+      - name: Verify ValidatingWebhookConfiguration was created
+        run: kubectl get validatingwebhookconfiguration early-watch-validating-webhook
+
+      - name: Test watchctl add with a sample manifest
+        run: watchctl add --kubeconfig "$HOME/.kube/config" config/samples/protect_configmap_from_deletion.yaml
+
+      - name: Verify ChangeValidator was created
+        run: kubectl get changevalidator protect-configmap-from-deletion -n default
+
+      - name: Test watchctl list-touches
+        run: watchctl list-touches --kubeconfig "$HOME/.kube/config"
+
+      - name: Test watchctl approve
+        run: |
+          # Generate an RSA private key for testing (PKCS#8 format)
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/test-key.pem
+
+          # Create a ConfigMap to sign
+          kubectl create configmap test-approval --from-literal=key=value
+
+          # Sign and annotate the ConfigMap
+          watchctl approve \
+            --kubeconfig "$HOME/.kube/config" \
+            --private-key /tmp/test-key.pem \
+            --resource configmaps \
+            --namespace default \
+            --name test-approval
+
+          # Verify the approval annotation was written
+          sig=$(kubectl get configmap test-approval \
+            -o jsonpath='{.metadata.annotations.earlywatch\.io/approved}')
+          if [ -z "$sig" ]; then
+            echo "ERROR: approval annotation not found on ConfigMap"
+            exit 1
+          fi
+          echo "Approval annotation set successfully: ${sig:0:20}..."
+
+      - name: Test watchctl uninstall
+        run: watchctl uninstall --kubeconfig "$HOME/.kube/config"
+
+      - name: Verify CRD was removed
+        run: |
+          if kubectl get crd changevalidators.earlywatch.io 2>/dev/null; then
+            echo "ERROR: CRD still exists after uninstall"
+            exit 1
+          fi
+          echo "CRD successfully removed"
+
+      - name: Verify namespace was removed
+        run: |
+          kubectl wait --for=delete namespace/early-watch-system --timeout=60s \
+            || { echo "ERROR: Namespace early-watch-system still exists after uninstall"; exit 1; }
+          echo "Namespace successfully removed"
