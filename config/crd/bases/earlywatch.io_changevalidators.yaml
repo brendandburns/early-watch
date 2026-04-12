@@ -81,6 +81,14 @@ spec:
                         Resource is the plural resource name, e.g. "services",
                         "deployments".
                       type: string
+                    names:
+                      description: >
+                        Names optionally restricts this guard to only resources
+                        whose name is in the list. When omitted the guard
+                        applies to all resources of the given type.
+                      type: array
+                      items:
+                        type: string
                     namespaceSelector:
                       description: >
                         NamespaceSelector optionally restricts this guard to
@@ -161,6 +169,9 @@ spec:
                         enum:
                           - ExistingResources
                           - ExpressionCheck
+                          - NameReferenceCheck
+                          - ApprovalCheck
+                          - CheckLock
                       message:
                         description: >
                           Message is the human-readable denial message
@@ -247,6 +258,82 @@ spec:
                               admission request object as "request" and must
                               return a boolean. When true, the request is
                               denied.
+                            type: string
+                      nameReferenceCheck:
+                        description: >
+                          NameReferenceCheck checks whether the subject
+                          resource is referenced by name in other cluster
+                          resources and denies the request when any such
+                          references are found. Required when type is
+                          NameReferenceCheck.
+                        type: object
+                        required:
+                          - resources
+                        properties:
+                          resources:
+                            description: >
+                              Resources is the list of resource types to scan
+                              for references to the subject resource.
+                            type: array
+                            minItems: 1
+                            items:
+                              type: object
+                              required:
+                                - resource
+                                - nameFields
+                              properties:
+                                apiGroup:
+                                  description: >
+                                    APIGroup is the API group of the resource
+                                    type to scan. Use "" for core resources.
+                                  type: string
+                                resource:
+                                  description: >
+                                    Resource is the plural name of the resource
+                                    type to scan, e.g. "deployments".
+                                  type: string
+                                version:
+                                  description: >
+                                    Version is the API version of the resource
+                                    type to scan. Defaults to "v1" when omitted.
+                                  type: string
+                                nameFields:
+                                  description: >
+                                    NameFields is the list of dot-separated JSON
+                                    field paths at which the subject resource's
+                                    name might appear.
+                                  type: array
+                                  minItems: 1
+                                  items:
+                                    type: string
+                          sameNamespace:
+                            description: >
+                              SameNamespace, when true, restricts the lookup
+                              to the same namespace as the subject resource.
+                              Defaults to true.
+                            type: boolean
+                            default: true
+                      approvalCheck:
+                        description: >
+                          ApprovalCheck verifies that the resource carries a
+                          valid approval annotation signed with the private key
+                          corresponding to the configured public key. Required
+                          when type is ApprovalCheck.
+                        type: object
+                        required:
+                          - publicKey
+                        properties:
+                          publicKey:
+                            description: >
+                              PublicKey is the PEM-encoded RSA public key
+                              (PKIX/SubjectPublicKeyInfo format) used to verify
+                              the approval signature.
+                            type: string
+                          annotationKey:
+                            description: >
+                              AnnotationKey is the annotation on the resource
+                              whose value holds the base64-encoded approval
+                              signature. Defaults to "earlywatch.io/approved".
                             type: string
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.
