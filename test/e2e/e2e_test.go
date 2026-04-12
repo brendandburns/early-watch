@@ -60,7 +60,7 @@ var (
 	// important for the cleanup helper, which must see deleted ChangeValidators
 	// before attempting to delete guarded resources.
 	k8sClient client.Client
-	dynClient  dynamic.Interface
+	dynClient dynamic.Interface
 
 	// mgrCtx is cancelled in TestMain after all tests have run in order to
 	// shut down the webhook server.
