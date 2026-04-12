@@ -40,7 +40,7 @@ var listTouchesFlags struct {
 func init() {
 	f := listTouchesCmd.Flags()
 	f.StringVar(&listTouchesFlags.kubeconfig, "kubeconfig", "",
-		"Path to the kubeconfig file. Defaults to in-cluster config when empty.")
+		"Path to the kubeconfig file. When empty, uses the default kubeconfig loading rules.")
 	f.StringVarP(&listTouchesFlags.namespace, "namespace", "n", "",
 		"Kubernetes namespace to list touches from. Lists across all namespaces when empty.")
 }
