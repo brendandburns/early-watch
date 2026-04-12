@@ -13,10 +13,11 @@ clusters:
   - name: earlywatch-audit-monitor
     cluster:
       # Replace with the actual in-cluster or external URL of the audit monitor.
+      # Configure the audit monitor with TLS and use its HTTPS endpoint.
       # When deployed inside the same cluster, use the service DNS name:
-      server: http://early-watch-audit-monitor.early-watch-system.svc.cluster.local:8090/audit
-      # If TLS is enabled, uncomment and set the CA bundle:
-      # certificate-authority: /etc/kubernetes/audit/ca.crt
+      server: https://early-watch-audit-monitor.early-watch-system.svc.cluster.local:8090/audit
+      # Pin trust to the CA that issued the audit monitor's serving certificate.
+      certificate-authority: /etc/kubernetes/audit/ca.crt
 contexts:
   - name: default
     context:
