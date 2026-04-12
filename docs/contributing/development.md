@@ -84,7 +84,7 @@ Linting is also enforced in CI — the `Lint` workflow runs on every pull reques
 
 ## Pre-PR Checklist
 
-Before opening or finalising a pull request, ensure all of the following pass:
+Before opening or finalizing a pull request, ensure all of the following pass:
 
 ```bash
 # 1. Unit tests
