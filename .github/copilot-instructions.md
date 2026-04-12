@@ -31,9 +31,58 @@ When reviewing pull requests, prioritize the following:
 
 ## Pre-PR Checklist
 
+**CRITICAL: You must run the linter and tests before opening or pushing a pull request. Do not open or update a pull request without first running and fixing all linting errors locally.**
+
 Before opening or finalizing a pull request, always run the following commands locally and ensure they all pass:
 
-1. **Unit tests**: `go test ./pkg/... -v -count=1`
-2. **Linters**: `golangci-lint run --config .golangci.yml ./...`
+1. **Linters**: `golangci-lint run --config .golangci.yml ./...`
+2. **Unit tests**: `go test ./pkg/... -v -count=1`
 
-Do not submit a pull request if either of these commands reports failures or formatting issues.
+If either command fails, fix all reported issues before pushing. **Do not submit a pull request if either of these commands reports failures or formatting issues.**
+
+## Common Lint Errors to Avoid
+
+These errors appear repeatedly in CI failures. Pay close attention to them:
+
+### errcheck — always check error return values
+The `errcheck` linter requires that every function returning an `error` has its error value checked. This applies even to standard library I/O functions that are often ignored in example code.
+
+**Bad** (will fail `errcheck`):
+```go
+fmt.Fprintln(w, "header")
+fmt.Fprintf(w, "%s\n", value)
+tw.Flush()
+w.Close()
+```
+
+**Good** (check or explicitly discard each error):
+```go
+if _, err := fmt.Fprintln(w, "header"); err != nil {
+    return err
+}
+if _, err := fmt.Fprintf(w, "%s\n", value); err != nil {
+    return err
+}
+if err := tw.Flush(); err != nil {
+    return err
+}
+if err := w.Close(); err != nil {
+    return err
+}
+```
+
+### revive — avoid repetitive exported names
+Exported names must not repeat the package name. Go callers already qualify names with the package, so repeating it is redundant.
+
+**Bad**: `func ApplyManifest(...)` in package `apply` → called as `apply.ApplyManifest`  
+**Good**: `func Manifest(...)` in package `apply` → called as `apply.Manifest`
+
+### unused — remove unused declarations
+Delete any constants, variables, or imports that are defined but never used.
+
+### misspell — use US English spelling
+All comments and string literals must use American English. Common traps:
+- `minimising` → `minimizing`
+- `initialising` → `initializing`
+- `colour` → `color`
+- `behaviour` → `behavior`
