@@ -34,11 +34,15 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	k8sclientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -47,6 +51,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
+	ewinstall "github.com/brendandburns/early-watch/pkg/install"
 	ewwebhook "github.com/brendandburns/early-watch/pkg/webhook"
 )
 
@@ -61,6 +66,11 @@ var (
 	// before attempting to delete guarded resources.
 	k8sClient client.Client
 	dynClient dynamic.Interface
+
+	// restCfg is the REST config for the envtest cluster.  It is exposed so
+	// that TestInstallUninstall can build a temporary kubeconfig and exercise
+	// the install/uninstall code paths against the same cluster.
+	restCfg *rest.Config
 
 	// mgrCtx is cancelled in TestMain after all tests have run in order to
 	// shut down the webhook server.
@@ -91,6 +101,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic("envtest.Start: " + err.Error())
 	}
+	restCfg = cfg
 
 	// Build a direct (non-caching) client for test setup, teardown, and as the
 	// AdmissionHandler's client.  Using a direct client ensures the handler
@@ -685,5 +696,83 @@ func TestApprovalCheck_DeleteDeniedWithWrongKey(t *testing.T) {
 	}
 	if !kerrors.IsForbidden(err) {
 		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// --- install / uninstall tests ---
+
+// writeTestKubeconfig serialises the envtest REST config into a temporary
+// kubeconfig file and returns the path.  The file is cleaned up automatically
+// when the test ends.
+func writeTestKubeconfig(t *testing.T) string {
+	t.Helper()
+
+	kubecfg := k8sclientcmdapi.NewConfig()
+	kubecfg.Clusters["e2e"] = &k8sclientcmdapi.Cluster{
+		Server:                   restCfg.Host,
+		CertificateAuthorityData: restCfg.CAData,
+	}
+	kubecfg.AuthInfos["e2e"] = &k8sclientcmdapi.AuthInfo{
+		ClientCertificateData: restCfg.CertData,
+		ClientKeyData:         restCfg.KeyData,
+	}
+	kubecfg.Contexts["e2e"] = &k8sclientcmdapi.Context{
+		Cluster:  "e2e",
+		AuthInfo: "e2e",
+	}
+	kubecfg.CurrentContext = "e2e"
+
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := clientcmd.WriteToFile(*kubecfg, path); err != nil {
+		t.Fatalf("writing test kubeconfig: %v", err)
+	}
+	return path
+}
+
+// TestInstallUninstall is placed last so that the ValidatingWebhookConfiguration
+// created by install does not slow down the earlier tests (the webhook service
+// it points to does not exist in the test cluster, so every admission request
+// would have to wait for the 10-second timeout before being ignored).
+//
+// The test verifies the full install → assert → uninstall → assert cycle.
+func TestInstallUninstall(t *testing.T) {
+	kubeconfig := writeTestKubeconfig(t)
+	ctx := context.Background()
+
+	// --- install ---
+	if err := ewinstall.Run(ewinstall.Options{Kubeconfig: kubeconfig}); err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+
+	// Verify the ClusterRole was created with the managed-by annotation.
+	role := &rbacv1.ClusterRole{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-role"}, role); err != nil {
+		t.Fatalf("expected ClusterRole early-watch-role to exist after install: %v", err)
+	}
+	if got := role.Annotations[ewinstall.CreatedByAnnotation]; got != "watchctl" {
+		t.Errorf("expected annotation %s=watchctl on ClusterRole, got %q", ewinstall.CreatedByAnnotation, got)
+	}
+
+	// Verify the Namespace was created.
+	ns := &corev1.Namespace{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-system"}, ns); err != nil {
+		t.Fatalf("expected Namespace early-watch-system to exist after install: %v", err)
+	}
+
+	// --- uninstall ---
+	if err := ewinstall.Uninstall(ewinstall.UninstallOptions{Kubeconfig: kubeconfig}); err != nil {
+		t.Fatalf("uninstall failed: %v", err)
+	}
+
+	// Verify the ClusterRole was deleted.
+	role = &rbacv1.ClusterRole{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-role"}, role); !kerrors.IsNotFound(err) {
+		t.Fatalf("expected ClusterRole early-watch-role to be absent after uninstall, got: %v", err)
+	}
+
+	// Verify the ClusterRoleBinding was deleted.
+	crb := &rbacv1.ClusterRoleBinding{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Name: "early-watch-rolebinding"}, crb); !kerrors.IsNotFound(err) {
+		t.Fatalf("expected ClusterRoleBinding early-watch-rolebinding to be absent after uninstall, got: %v", err)
 	}
 }
