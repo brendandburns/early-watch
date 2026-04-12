@@ -18,7 +18,14 @@ package e2e_test
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -30,8 +37,8 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/dynamic"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -283,6 +290,54 @@ func makePod(t *testing.T, name string, labels map[string]string) *corev1.Pod {
 
 func boolPtr(b bool) *bool { return &b }
 
+// --- approval-check helper ---
+
+// generateKeyPair generates a 2048-bit RSA key pair and returns the private
+// key together with the PEM-encoded public key ready to embed in a
+// ChangeValidator ApprovalCheck rule.
+func generateKeyPair(t *testing.T) (*rsa.PrivateKey, string) {
+	t.Helper()
+	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey: %v", err)
+	}
+	pubDER, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
+	if err != nil {
+		t.Fatalf("MarshalPKIXPublicKey: %v", err)
+	}
+	pubPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}))
+	return privKey, pubPEM
+}
+
+// approveResource computes the canonical resource path, signs it with the
+// given private key (RSA-PSS SHA-256), and patches the approval annotation
+// onto the resource — mirroring exactly what the approve CLI tool does.
+func approveResource(t *testing.T, privKey *rsa.PrivateKey, annotationKey, group, version, resource, namespace, name string) {
+	t.Helper()
+
+	path := ewwebhook.ResourcePath(group, version, resource, namespace, name)
+
+	digest := sha256.Sum256([]byte(path))
+	sig, err := rsa.SignPSS(rand.Reader, privKey, crypto.SHA256, digest[:], nil)
+	if err != nil {
+		t.Fatalf("rsa.SignPSS: %v", err)
+	}
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	// Fetch the ConfigMap, add the annotation, then update.
+	cm := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, cm); err != nil {
+		t.Fatalf("Get ConfigMap %q for annotation: %v", name, err)
+	}
+	if cm.Annotations == nil {
+		cm.Annotations = map[string]string{}
+	}
+	cm.Annotations[annotationKey] = sigB64
+	if err := k8sClient.Update(context.Background(), cm); err != nil {
+		t.Fatalf("Update ConfigMap %q with approval annotation: %v", name, err)
+	}
+}
+
 // --- test cases ---
 
 // TestNoGuards_AllowsRequests verifies that when no ChangeValidators exist all
@@ -495,5 +550,140 @@ func TestExistingResources_LabelSelector_AllowsWhenNoMatchingPods(t *testing.T) 
 	svc := makeService(t, "my-service-2", map[string]string{"app": "my-app"})
 	if err := k8sClient.Delete(context.Background(), svc); err != nil {
 		t.Fatalf("expected Service DELETE to be allowed when no matching Pods exist: %v", err)
+	}
+}
+
+// TestApprovalCheck_DeleteDeniedWithoutAnnotation verifies that an
+// ApprovalCheck guard blocks a DELETE when the resource has no approval
+// annotation.
+func TestApprovalCheck_DeleteDeniedWithoutAnnotation(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	_, pubPEM := generateKeyPair(t)
+
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "require-approval"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "check-approval",
+				Type:    ewv1alpha1.RuleTypeApprovalCheck,
+				Message: "resource must be approved before deletion",
+				ApprovalCheck: &ewv1alpha1.ApprovalCheck{
+					PublicKey: pubPEM,
+				},
+			}},
+		},
+	})
+
+	cm := makeConfigMap(t, "unapproved-cm")
+	err := k8sClient.Delete(context.Background(), cm)
+	if err == nil {
+		t.Fatal("expected DELETE to be denied because no approval annotation is present")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// TestApprovalCheck_DeleteAllowedWithValidApproval verifies the full approval
+// flow: a DELETE is initially denied, then the approve tool logic signs the
+// resource path and annotates the resource, and the subsequent DELETE succeeds.
+func TestApprovalCheck_DeleteAllowedWithValidApproval(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	privKey, pubPEM := generateKeyPair(t)
+	const annotationKey = "earlywatch.io/approved"
+
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "require-approval-full"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "check-approval",
+				Type:    ewv1alpha1.RuleTypeApprovalCheck,
+				Message: "resource must be approved before deletion",
+				ApprovalCheck: &ewv1alpha1.ApprovalCheck{
+					PublicKey:     pubPEM,
+					AnnotationKey: annotationKey,
+				},
+			}},
+		},
+	})
+
+	cm := makeConfigMap(t, "approved-cm")
+
+	// Step 1: DELETE without approval must be denied.
+	err := k8sClient.Delete(context.Background(), cm)
+	if err == nil {
+		t.Fatal("expected initial DELETE to be denied because approval annotation is absent")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+
+	// Step 2: Apply the approval annotation using the same logic as the approve
+	// CLI tool — sign the canonical resource path with the private key.
+	approveResource(t, privKey, annotationKey, "", "v1", "configmaps", testNamespace, "approved-cm")
+
+	// Step 3: DELETE with the approval annotation must now be allowed.
+	// Re-fetch the ConfigMap so we have the up-to-date resourceVersion.
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "approved-cm"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap after annotation: %v", err)
+	}
+	if err := k8sClient.Delete(context.Background(), fresh); err != nil {
+		t.Fatalf("expected DELETE to succeed after approval annotation was set: %v", err)
+	}
+}
+
+// TestApprovalCheck_DeleteDeniedWithWrongKey verifies that a DELETE is denied
+// when the approval annotation was signed with a different private key than the
+// one configured in the rule.
+func TestApprovalCheck_DeleteDeniedWithWrongKey(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	privKey1, _ := generateKeyPair(t)
+	_, pubPEM2 := generateKeyPair(t) // different key pair
+
+	const annotationKey = "earlywatch.io/approved"
+
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "require-approval-wrong-key"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "check-approval",
+				Type:    ewv1alpha1.RuleTypeApprovalCheck,
+				Message: "resource must be approved before deletion",
+				ApprovalCheck: &ewv1alpha1.ApprovalCheck{
+					PublicKey:     pubPEM2, // webhook verifies with key2
+					AnnotationKey: annotationKey,
+				},
+			}},
+		},
+	})
+
+	makeConfigMap(t, "wrong-key-cm")
+
+	// Sign with key1 but the guard expects key2.
+	approveResource(t, privKey1, annotationKey, "", "v1", "configmaps", testNamespace, "wrong-key-cm")
+
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "wrong-key-cm"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap: %v", err)
+	}
+	err := k8sClient.Delete(context.Background(), fresh)
+	if err == nil {
+		t.Fatal("expected DELETE to be denied because the annotation was signed with the wrong key")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
 	}
 }
