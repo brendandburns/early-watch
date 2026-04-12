@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
+	"github.com/brendandburns/early-watch/pkg/auditmonitor"
 )
 
 // AdmissionHandler handles admission webhook requests by evaluating
@@ -163,6 +165,12 @@ func (h *AdmissionHandler) evaluateRule(
 			return false, "", fmt.Errorf("rule %q has type AnnotationCheck but no annotationCheck config", rule.Name)
 		}
 		return evaluateAnnotationCheck(*rule.AnnotationCheck, rule.Message, req)
+
+	case ewv1alpha1.RuleTypeManualTouchCheck:
+		if rule.ManualTouchCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type ManualTouchCheck but no manualTouchCheck config", rule.Name)
+		}
+		return h.evaluateManualTouchCheck(ctx, *rule.ManualTouchCheck, rule.Message, req)
 
 	case ewv1alpha1.RuleTypeCheckLock:
 		return evaluateCheckLock(rule.Message, req)
@@ -612,6 +620,57 @@ func evaluateAnnotationCheck(check ewv1alpha1.AnnotationCheck, message string, r
 		valStr, _ := val.(string)
 		if valStr != *check.AnnotationValue {
 			return true, message, nil
+		}
+	}
+
+	return false, "", nil
+}
+
+// evaluateManualTouchCheck denies the request when a ManualTouchEvent has been
+// recorded for the same resource within the configured look-back window.
+// This prevents automated pipelines from overwriting an operator's manual change.
+func (h *AdmissionHandler) evaluateManualTouchCheck(
+	ctx context.Context,
+	check ewv1alpha1.ManualTouchCheck,
+	message string,
+	req admission.Request,
+) (bool, string, error) {
+	// Parse the window duration; default to 1 hour.
+	windowDuration := time.Hour
+	if check.WindowDuration != "" {
+		d, err := time.ParseDuration(check.WindowDuration)
+		if err != nil {
+			return false, "", fmt.Errorf("invalid windowDuration %q: %w", check.WindowDuration, err)
+		}
+		windowDuration = d
+	}
+
+	eventNamespace := check.EventNamespace
+	if eventNamespace == "" {
+		eventNamespace = auditmonitor.DefaultEventNamespace
+	}
+
+	// List ManualTouchEvents for this resource using label selectors.
+	labelSel := labels.SelectorFromSet(labels.Set{
+		auditmonitor.LabelResource:          req.Resource.Resource,
+		auditmonitor.LabelResourceNamespace: req.Namespace,
+		auditmonitor.LabelResourceName:      req.Name,
+		auditmonitor.LabelAPIGroup:          req.Resource.Group,
+	})
+
+	mteList := &ewv1alpha1.ManualTouchEventList{}
+	if err := h.Client.List(ctx, mteList, &client.ListOptions{
+		Namespace:     eventNamespace,
+		LabelSelector: labelSel,
+	}); err != nil {
+		return false, "", fmt.Errorf("listing ManualTouchEvents: %w", err)
+	}
+
+	cutoff := time.Now().Add(-windowDuration)
+
+	for _, mte := range mteList.Items {
+		if mte.Spec.Timestamp.After(cutoff) {
+			return true, renderMessage(message, req), nil
 		}
 	}
 

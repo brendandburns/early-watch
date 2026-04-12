@@ -19,6 +19,8 @@ var (
 
 func init() {
 	SchemeBuilder.Register(&ChangeValidator{}, &ChangeValidatorList{})
+	SchemeBuilder.Register(&ManualTouchMonitor{}, &ManualTouchMonitorList{})
+	SchemeBuilder.Register(&ManualTouchEvent{}, &ManualTouchEventList{})
 }
 
 // Resource returns a GroupResource for the given resource string.

@@ -3,8 +3,18 @@ name: Unit Tests
 on:
   push:
     branches: [main]
+    paths:
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/unit-tests.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/unit-tests.yml'
 
 jobs:
   unit-tests:

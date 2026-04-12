@@ -1,11 +1,4 @@
 ---
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: early-watch-system
-  labels:
-    app.kubernetes.io/name: early-watch
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -1,0 +1,37 @@
+---
+# Example ManualTouchMonitor that flags kubectl DELETE operations on Services
+# and Deployments in any namespace.
+#
+# Apply with:
+#   kubectl apply -f config/samples/monitor_kubectl_deletes.yaml
+#
+# Then try deleting a Service with kubectl and check:
+#   kubectl get manualtouchevents -n early-watch-system
+apiVersion: earlywatch.io/v1alpha1
+kind: ManualTouchMonitor
+metadata:
+  name: monitor-kubectl-deletes
+  namespace: default
+spec:
+  # Watch both Services and Deployments.
+  subjects:
+    - apiGroup: ""        # core API group
+      resource: services
+    - apiGroup: apps
+      resource: deployments
+
+  # Flag DELETE, CREATE, and UPDATE operations performed via kubectl.
+  operations:
+    - DELETE
+    - CREATE
+    - UPDATE
+
+  # Identify kubectl by its default User-Agent prefix.
+  # You can add additional patterns for other manual tools (e.g. k9s, Lens).
+  userAgentPatterns:
+    - "^kubectl/"
+
+  # Exclude the CI/CD service account from flagging.
+  # Adjust the name to match your cluster's CI/CD service account.
+  excludeServiceAccounts:
+    - "system:serviceaccount:ci-system:pipeline-bot"
