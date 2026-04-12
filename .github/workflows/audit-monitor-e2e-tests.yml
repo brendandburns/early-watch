@@ -3,8 +3,24 @@ name: Audit Monitor E2E Tests
 on:
   push:
     branches: [main]
+    paths:
+      - 'pkg/auditmonitor/**'
+      - 'pkg/apis/earlywatch/v1alpha1/**'
+      - 'cmd/audit-monitor/**'
+      - 'test/e2e/auditmonitor/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/audit-monitor-e2e-tests.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'pkg/auditmonitor/**'
+      - 'pkg/apis/earlywatch/v1alpha1/**'
+      - 'cmd/audit-monitor/**'
+      - 'test/e2e/auditmonitor/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/audit-monitor-e2e-tests.yml'
 
 jobs:
   audit-monitor-e2e:
