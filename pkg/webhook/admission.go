@@ -152,7 +152,6 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return evaluateAnnotationCheck(*rule.AnnotationCheck, rule.Message, req)
 
-
 	case ewv1alpha1.RuleTypeCheckLock:
 		return evaluateCheckLock(rule.Message, req)
 

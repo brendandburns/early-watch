@@ -114,7 +114,6 @@ type AnnotationCheck struct {
 	AnnotationValue *string `json:"annotationValue,omitempty"`
 }
 
-
 // LockAnnotation is the annotation key that, when present on a resource,
 // prevents it from being deleted.  Any non-empty annotation value is treated
 // as a lock.
@@ -141,7 +140,6 @@ const (
 	// Use this to implement a "confirm delete" pattern where a resource can
 	// only be deleted after the operator adds a designated annotation.
 	RuleTypeAnnotationCheck RuleType = "AnnotationCheck"
-
 
 	// RuleTypeCheckLock denies a DELETE request when the subject resource
 	// carries the earlywatch.io/lock annotation.

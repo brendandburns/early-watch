@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -15,6 +14,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	clientfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 )
 
 // makeRequest builds an admission.Request for testing.
@@ -553,7 +554,7 @@ func makeDeleteRequest(group, resource, name string, obj interface{}) admission.
 	}
 }
 
-// namespaceObj returns a minimal Namespace object suitable for serialisation.
+// namespaceObj returns a minimal Namespace object suitable for serialization.
 func namespaceObj(name string) map[string]interface{} {
 	return map[string]interface{}{
 		"apiVersion": "v1",
@@ -821,7 +822,7 @@ func TestNameExistsAtPath_TraversesArray(t *testing.T) {
 		"spec": map[string]interface{}{
 			"volumes": []interface{}{
 				map[string]interface{}{
-					"name":      "data-vol",
+					"name":     "data-vol",
 					"emptyDir": map[string]interface{}{},
 				},
 				map[string]interface{}{
@@ -1168,20 +1169,19 @@ func TestHandle_NameReferenceCheck_AllowedWhenNoWorkloads(t *testing.T) {
 	}
 }
 
-
 // --- AnnotationCheck tests ---
 
 // namespaceObjWithAnnotations returns a minimal Namespace object with the
-// provided annotations, suitable for serialisation into an admission request.
+// provided annotations, suitable for serialization into an admission request.
 func namespaceObjWithAnnotations(name string, annotations map[string]string) map[string]interface{} {
-return map[string]interface{}{
-"apiVersion": "v1",
-"kind":       "Namespace",
-"metadata": map[string]interface{}{
-"name":        name,
-"annotations": annotations,
-},
-}
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]interface{}{
+			"name":        name,
+			"annotations": annotations,
+		},
+	}
 }
 
 // strPtr returns a pointer to the given string value.
@@ -1190,202 +1190,201 @@ func strPtr(s string) *string { return &s }
 // TestEvaluateAnnotationCheck_AnnotationAbsent verifies that the check is
 // violated when the required annotation is missing from the object.
 func TestEvaluateAnnotationCheck_AnnotationAbsent(t *testing.T) {
-check := ewv1alpha1.AnnotationCheck{
-AnnotationKey:   "earlywatch.io/confirm-delete",
-AnnotationValue: strPtr("true"),
-}
-obj := namespaceObj("kube-system") // no annotations
-req := makeDeleteRequest("", "namespaces", "kube-system", obj)
+	check := ewv1alpha1.AnnotationCheck{
+		AnnotationKey:   "earlywatch.io/confirm-delete",
+		AnnotationValue: strPtr("true"),
+	}
+	obj := namespaceObj("kube-system") // no annotations
+	req := makeDeleteRequest("", "namespaces", "kube-system", obj)
 
-violated, msg, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if !violated {
-t.Error("expected check to be violated when annotation is absent")
-}
-if msg != "confirm annotation required" {
-t.Errorf("unexpected message: %q", msg)
-}
+	violated, msg, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected check to be violated when annotation is absent")
+	}
+	if msg != "confirm annotation required" {
+		t.Errorf("unexpected message: %q", msg)
+	}
 }
 
 // TestEvaluateAnnotationCheck_AnnotationPresentCorrectValue verifies that the
 // check is NOT violated when the annotation key and value both match.
 func TestEvaluateAnnotationCheck_AnnotationPresentCorrectValue(t *testing.T) {
-check := ewv1alpha1.AnnotationCheck{
-AnnotationKey:   "earlywatch.io/confirm-delete",
-AnnotationValue: strPtr("true"),
-}
-obj := namespaceObjWithAnnotations("kube-system", map[string]string{
-"earlywatch.io/confirm-delete": "true",
-})
-req := makeDeleteRequest("", "namespaces", "kube-system", obj)
+	check := ewv1alpha1.AnnotationCheck{
+		AnnotationKey:   "earlywatch.io/confirm-delete",
+		AnnotationValue: strPtr("true"),
+	}
+	obj := namespaceObjWithAnnotations("kube-system", map[string]string{
+		"earlywatch.io/confirm-delete": "true",
+	})
+	req := makeDeleteRequest("", "namespaces", "kube-system", obj)
 
-violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if violated {
-t.Error("expected check NOT to be violated when annotation key and value match")
-}
+	violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected check NOT to be violated when annotation key and value match")
+	}
 }
 
 // TestEvaluateAnnotationCheck_AnnotationPresentWrongValue verifies that the
 // check is violated when the annotation key is present but the value differs.
 func TestEvaluateAnnotationCheck_AnnotationPresentWrongValue(t *testing.T) {
-check := ewv1alpha1.AnnotationCheck{
-AnnotationKey:   "earlywatch.io/confirm-delete",
-AnnotationValue: strPtr("true"),
-}
-obj := namespaceObjWithAnnotations("kube-system", map[string]string{
-"earlywatch.io/confirm-delete": "yes", // wrong value
-})
-req := makeDeleteRequest("", "namespaces", "kube-system", obj)
+	check := ewv1alpha1.AnnotationCheck{
+		AnnotationKey:   "earlywatch.io/confirm-delete",
+		AnnotationValue: strPtr("true"),
+	}
+	obj := namespaceObjWithAnnotations("kube-system", map[string]string{
+		"earlywatch.io/confirm-delete": "yes", // wrong value
+	})
+	req := makeDeleteRequest("", "namespaces", "kube-system", obj)
 
-violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if !violated {
-t.Error("expected check to be violated when annotation value does not match")
-}
+	violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected check to be violated when annotation value does not match")
+	}
 }
 
 // TestEvaluateAnnotationCheck_NoValueRequired verifies that when AnnotationValue
 // is nil, any annotation value (including empty string) satisfies the check.
 func TestEvaluateAnnotationCheck_NoValueRequired(t *testing.T) {
-check := ewv1alpha1.AnnotationCheck{
-AnnotationKey: "earlywatch.io/confirm-delete",
-// AnnotationValue intentionally omitted.
-}
-obj := namespaceObjWithAnnotations("kube-system", map[string]string{
-"earlywatch.io/confirm-delete": "anything",
-})
-req := makeDeleteRequest("", "namespaces", "kube-system", obj)
+	check := ewv1alpha1.AnnotationCheck{
+		AnnotationKey: "earlywatch.io/confirm-delete",
+		// AnnotationValue intentionally omitted.
+	}
+	obj := namespaceObjWithAnnotations("kube-system", map[string]string{
+		"earlywatch.io/confirm-delete": "anything",
+	})
+	req := makeDeleteRequest("", "namespaces", "kube-system", obj)
 
-violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if violated {
-t.Error("expected check NOT to be violated when annotation is present and no specific value is required")
-}
+	violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected check NOT to be violated when annotation is present and no specific value is required")
+	}
 }
 
 // TestEvaluateAnnotationCheck_NoObjectData verifies that the check is violated
 // when neither Object nor OldObject carries any raw data.
 func TestEvaluateAnnotationCheck_NoObjectData(t *testing.T) {
-check := ewv1alpha1.AnnotationCheck{
-AnnotationKey:   "earlywatch.io/confirm-delete",
-AnnotationValue: strPtr("true"),
-}
-req := makeDeleteRequest("", "namespaces", "kube-system", nil) // no object data
+	check := ewv1alpha1.AnnotationCheck{
+		AnnotationKey:   "earlywatch.io/confirm-delete",
+		AnnotationValue: strPtr("true"),
+	}
+	req := makeDeleteRequest("", "namespaces", "kube-system", nil) // no object data
 
-violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
-if err != nil {
-t.Fatalf("unexpected error: %v", err)
-}
-if !violated {
-t.Error("expected check to be violated when no object data is available")
-}
+	violated, _, err := evaluateAnnotationCheck(check, "confirm annotation required", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected check to be violated when no object data is available")
+	}
 }
 
 // TestEvaluateRule_NilAnnotationCheck verifies that evaluateRule returns an
 // error when the rule type is AnnotationCheck but no config is provided.
 func TestEvaluateRule_NilAnnotationCheck(t *testing.T) {
-h := &AdmissionHandler{}
-rule := ewv1alpha1.GuardRule{
-Name:            "bad-rule",
-Type:            ewv1alpha1.RuleTypeAnnotationCheck,
-Message:         "msg",
-AnnotationCheck: nil,
-}
-req := makeDeleteRequest("", "namespaces", "kube-system", nil)
+	h := &AdmissionHandler{}
+	rule := ewv1alpha1.GuardRule{
+		Name:            "bad-rule",
+		Type:            ewv1alpha1.RuleTypeAnnotationCheck,
+		Message:         "msg",
+		AnnotationCheck: nil,
+	}
+	req := makeDeleteRequest("", "namespaces", "kube-system", nil)
 
-_, _, err := h.evaluateRule(context.Background(), rule, req)
-if err == nil {
-t.Error("expected error for nil AnnotationCheck config")
-}
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil AnnotationCheck config")
+	}
 }
 
 // newKubeSystemAnnotationGuard builds a ChangeValidator that requires the
 // earlywatch.io/confirm-delete=true annotation before kube-system can be deleted.
 func newKubeSystemAnnotationGuard() *ewv1alpha1.ChangeValidator {
-return &ewv1alpha1.ChangeValidator{
-ObjectMeta: metav1.ObjectMeta{Name: "protect-kube-system"},
-Spec: ewv1alpha1.ChangeValidatorSpec{
-Subject: ewv1alpha1.SubjectResource{
-APIGroup: "",
-Resource: "namespaces",
-Names:    []string{"kube-system"},
-},
-Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
-Rules: []ewv1alpha1.GuardRule{
-{
-Name:    "require-confirm-delete-annotation",
-Type:    ewv1alpha1.RuleTypeAnnotationCheck,
-Message: "add earlywatch.io/confirm-delete=true to kube-system before deleting",
-AnnotationCheck: &ewv1alpha1.AnnotationCheck{
-AnnotationKey:   "earlywatch.io/confirm-delete",
-AnnotationValue: strPtr("true"),
-},
-},
-},
-},
-}
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-kube-system"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "namespaces",
+				Names:    []string{"kube-system"},
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "require-confirm-delete-annotation",
+					Type:    ewv1alpha1.RuleTypeAnnotationCheck,
+					Message: "add earlywatch.io/confirm-delete=true to kube-system before deleting",
+					AnnotationCheck: &ewv1alpha1.AnnotationCheck{
+						AnnotationKey:   "earlywatch.io/confirm-delete",
+						AnnotationValue: strPtr("true"),
+					},
+				},
+			},
+		},
+	}
 }
 
 // TestHandle_AnnotationCheck_KubeSystem_DeniedWithoutAnnotation verifies that
 // deleting kube-system is denied when the confirm-delete annotation is absent.
 func TestHandle_AnnotationCheck_KubeSystem_DeniedWithoutAnnotation(t *testing.T) {
-scheme := newHandlerScheme(t)
-guard := newKubeSystemAnnotationGuard()
-fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
-fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	scheme := newHandlerScheme(t)
+	guard := newKubeSystemAnnotationGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 
-h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
-req := makeDeleteRequest("", "namespaces", "kube-system", namespaceObj("kube-system"))
-resp := h.Handle(context.Background(), req)
-if resp.Allowed {
-t.Error("expected kube-system DELETE to be denied when confirm-delete annotation is absent")
-}
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeDeleteRequest("", "namespaces", "kube-system", namespaceObj("kube-system"))
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected kube-system DELETE to be denied when confirm-delete annotation is absent")
+	}
 }
 
 // TestHandle_AnnotationCheck_KubeSystem_AllowedWithAnnotation verifies that
 // deleting kube-system is allowed when the confirm-delete annotation is present.
 func TestHandle_AnnotationCheck_KubeSystem_AllowedWithAnnotation(t *testing.T) {
-scheme := newHandlerScheme(t)
-guard := newKubeSystemAnnotationGuard()
-fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
-fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	scheme := newHandlerScheme(t)
+	guard := newKubeSystemAnnotationGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 
-h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
-obj := namespaceObjWithAnnotations("kube-system", map[string]string{
-"earlywatch.io/confirm-delete": "true",
-})
-req := makeDeleteRequest("", "namespaces", "kube-system", obj)
-resp := h.Handle(context.Background(), req)
-if !resp.Allowed {
-t.Errorf("expected kube-system DELETE to be allowed when confirm-delete annotation is present: %v", resp.Result)
-}
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	obj := namespaceObjWithAnnotations("kube-system", map[string]string{
+		"earlywatch.io/confirm-delete": "true",
+	})
+	req := makeDeleteRequest("", "namespaces", "kube-system", obj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected kube-system DELETE to be allowed when confirm-delete annotation is present: %v", resp.Result)
+	}
 }
 
 // TestHandle_AnnotationCheck_OtherNamespace_AllowedWithoutAnnotation verifies
 // that the kube-system guard does NOT block deletion of other namespaces.
 func TestHandle_AnnotationCheck_OtherNamespace_AllowedWithoutAnnotation(t *testing.T) {
-scheme := newHandlerScheme(t)
-guard := newKubeSystemAnnotationGuard()
-fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
-fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	scheme := newHandlerScheme(t)
+	guard := newKubeSystemAnnotationGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 
-h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
-req := makeDeleteRequest("", "namespaces", "default", namespaceObj("default"))
-resp := h.Handle(context.Background(), req)
-if !resp.Allowed {
-t.Errorf("expected DELETE of a non-kube-system namespace to be allowed: %v", resp.Result)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+	req := makeDeleteRequest("", "namespaces", "default", namespaceObj("default"))
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected DELETE of a non-kube-system namespace to be allowed: %v", resp.Result)
+	}
 }
-}
-
 
 // --- renderMessage tests ---
 
@@ -1715,4 +1714,3 @@ func TestHandle_CheckLock_AllowedWhenNotLocked(t *testing.T) {
 		t.Errorf("expected DELETE to be allowed when no lock annotation is set: %v", resp.Result)
 	}
 }
-
