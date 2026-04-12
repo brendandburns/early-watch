@@ -1,6 +1,19 @@
+version: "2"
+
 run:
   timeout: 5m
   modules-download-mode: readonly
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/brendandburns/early-watch
 
 linters:
   enable:
@@ -8,8 +21,6 @@ linters:
     - govet
     - ineffassign
     - staticcheck
-    - gofmt
-    - goimports
     - misspell
     - unconvert
     - unparam
@@ -20,10 +31,6 @@ linters:
     - revive
     - whitespace
   settings:
-    gofmt:
-      simplify: true
-    goimports:
-      local-prefixes: github.com/brendandburns/early-watch
     misspell:
       locale: US
     revive:
@@ -42,16 +49,17 @@ linters:
     exhaustive:
       default-signifies-exhaustive: true
 
-issues:
-  exclude-rules:
+  exclusions:
     # Exclude generated files from linting.
-    - path: zz_generated
-      linters:
-        - all
+    paths:
+      - zz_generated
     # Test files are allowed to use unexported helpers.
-    - path: _test\.go
-      linters:
-        - unparam
-        - revive
+    rules:
+      - path: _test\.go
+        linters:
+          - unparam
+          - revive
+
+issues:
   max-issues-per-linter: 0
   max-same-issues: 0
