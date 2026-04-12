@@ -34,6 +34,14 @@ const defaultWebhookImage = "early-watch:latest"
 // fieldManager is the field manager name used for Server-Side Apply.
 const fieldManager = "watchctl"
 
+// ManagedByAnnotation is the annotation key written onto every resource
+// applied by "watchctl install". Its value identifies the tool that created
+// the resource, making it easy to list or delete all managed resources later.
+const ManagedByAnnotation = "earlywatch.io/created-by"
+
+// managedByValue is the value written to ManagedByAnnotation.
+const managedByValue = "watchctl"
+
 // Options holds the parameters for an install operation.
 type Options struct {
 	// Kubeconfig is the path to a kubeconfig file. Falls back to in-cluster
@@ -128,6 +136,10 @@ func applyManifest(
 			continue
 		}
 
+		// Stamp every resource with the managed-by annotation so it can be
+		// identified and removed later.
+		injectAnnotation(obj, ManagedByAnnotation, managedByValue)
+
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			return fmt.Errorf("mapping resource %s %q: %w", gvk.Kind, obj.GetName(), err)
@@ -189,6 +201,16 @@ func buildRESTConfig(kubeconfig string) (*rest.Config, error) {
 		return nil, fmt.Errorf("loading kubeconfig: %w", err)
 	}
 	return cfg, nil
+}
+
+// injectAnnotation adds or overwrites a single annotation on obj.
+func injectAnnotation(obj *unstructured.Unstructured, key, value string) {
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[key] = value
+	obj.SetAnnotations(annotations)
 }
 
 func boolPtr(b bool) *bool { return &b }
