@@ -5,15 +5,11 @@ on:
     branches: [main]
     paths:
       - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
       - '.github/workflows/codeql.yml'
   pull_request:
     branches: [main]
     paths:
       - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
       - '.github/workflows/codeql.yml'
   schedule:
     - cron: '0 0 * * 1'

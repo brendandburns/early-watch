@@ -5,16 +5,12 @@ on:
     branches: [main]
     paths:
       - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
       - '.golangci.yml'
       - '.github/workflows/lint.yml'
   pull_request:
     branches: [main]
     paths:
       - '**/*.go'
-      - 'go.mod'
-      - 'go.sum'
       - '.golangci.yml'
       - '.github/workflows/lint.yml'
 
