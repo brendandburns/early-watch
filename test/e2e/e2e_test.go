@@ -196,6 +196,7 @@ func writeKubeconfig(cfg *rest.Config) (string, error) {
 	defer f.Close()
 
 	if _, err := f.Write(data); err != nil {
+		_ = os.Remove(f.Name())
 		return "", fmt.Errorf("writing kubeconfig: %w", err)
 	}
 	return f.Name(), nil

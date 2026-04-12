@@ -1,9 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	ewinstall "github.com/brendandburns/early-watch/pkg/install"
@@ -47,9 +44,5 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		Image:      installFlags.image,
 	}
 
-	if err := ewinstall.Run(opts); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return err
-	}
-	return nil
+	return ewinstall.Run(opts)
 }
