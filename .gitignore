@@ -9,8 +9,8 @@
 *.dylib
 
 # Built binaries (no extension, placed at repo root)
-watchctl
-webhook
+/watchctl
+/webhook
 
 # Test binary, built with `go test -c`
 *.test
