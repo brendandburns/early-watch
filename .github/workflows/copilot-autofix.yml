@@ -1,0 +1,40 @@
+name: Copilot Auto-fix
+
+on:
+  workflow_run:
+    workflows:
+      - "Unit Tests"
+      - "E2E Tests"
+    types:
+      - completed
+
+jobs:
+  trigger-copilot:
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Find associated pull request
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=$(gh pr list --repo "$REPO" --state open --json number,headRefOid \
+            --jq ".[] | select(.headRefOid == \"$HEAD_SHA\") | .number" | head -n1)
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Comment to trigger Copilot fix
+        if: steps.find-pr.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.find-pr.outputs.pr_number }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$REPO" \
+            --body "@copilot The **${WORKFLOW}** CI check failed on this dependabot PR. Please investigate the failure and fix it."
