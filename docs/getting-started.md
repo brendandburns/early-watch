@@ -53,7 +53,7 @@ Test it by trying to delete a Service while its Pods are running:
 
 ```bash
 kubectl delete service my-service
-# Error from server: admission webhook "earlywatch.webhook.io" denied the request:
+# Error from server: admission webhook "validate.earlywatch.io" denied the request:
 # Service "my-service" cannot be deleted because Pods that match its label selector are still running.
 ```
 
