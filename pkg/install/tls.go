@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// certValidityYears is the validity period used for generated TLS certificates.
+const certValidityYears = 10
+
 // webhookCerts holds the TLS material generated for the EarlyWatch webhook server.
 type webhookCerts struct {
 	// caCert is the PEM-encoded CA certificate.  It is set as the caBundle on
@@ -52,7 +55,7 @@ func generateWebhookCerts() (*webhookCerts, error) {
 		SerialNumber:          caSerial,
 		Subject:               pkix.Name{CommonName: "earlywatch-webhook-ca"},
 		NotBefore:             now.Add(-time.Minute),
-		NotAfter:              now.Add(10 * 365 * 24 * time.Hour),
+		NotAfter:              now.AddDate(certValidityYears, 0, 0),
 		IsCA:                  true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
@@ -84,7 +87,7 @@ func generateWebhookCerts() (*webhookCerts, error) {
 		Subject:      pkix.Name{CommonName: webhookServiceName + "." + systemNamespace + ".svc"},
 		DNSNames:     webhookDNSNames(),
 		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(10 * 365 * 24 * time.Hour),
+		NotAfter:     now.AddDate(certValidityYears, 0, 0),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}

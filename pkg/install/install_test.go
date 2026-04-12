@@ -90,7 +90,9 @@ func TestInjectCABundle(t *testing.T) {
 	obj := buildUnstructuredVWC()
 
 	caBundle := []byte("fake-ca-bundle")
-	injectCABundle(obj, caBundle)
+	if err := injectCABundle(obj, caBundle); err != nil {
+		t.Fatalf("injectCABundle: %v", err)
+	}
 
 	wantB64 := base64.StdEncoding.EncodeToString(caBundle)
 

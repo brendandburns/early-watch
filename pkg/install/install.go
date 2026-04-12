@@ -55,8 +55,9 @@ const webhookTLSSecretName = "early-watch-webhook-server-cert"
 
 // objectModifier is an optional hook called on each parsed Kubernetes object
 // before it is Server-Side Applied.  Implementations may mutate the object
-// in-place (e.g. to inject dynamic values such as a CA bundle).
-type objectModifier func(*unstructured.Unstructured)
+// in-place (e.g. to inject dynamic values such as a CA bundle) and return an
+// error to abort the apply if mutation fails.
+type objectModifier func(*unstructured.Unstructured) error
 
 // Options holds the parameters for an install operation.
 type Options struct {
@@ -116,10 +117,11 @@ func Run(opts Options) error {
 
 	// Modifier that injects the generated CA bundle into the
 	// ValidatingWebhookConfiguration before it is Server-Side Applied.
-	modifier := func(obj *unstructured.Unstructured) {
+	modifier := func(obj *unstructured.Unstructured) error {
 		if obj.GetKind() == "ValidatingWebhookConfiguration" {
-			injectCABundle(obj, certs.caCert)
+			return injectCABundle(obj, certs.caCert)
 		}
+		return nil
 	}
 
 	// Apply manifests in order: CRD first, then RBAC, then webhook resources.
@@ -188,7 +190,9 @@ func applyManifest(
 
 		// Allow the caller to mutate the object before it is applied.
 		if modifier != nil {
-			modifier(obj)
+			if err := modifier(obj); err != nil {
+				return fmt.Errorf("modifying %s %q: %w", gvk.Kind, obj.GetName(), err)
+			}
 		}
 
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
@@ -336,10 +340,14 @@ func applyTLSSecret(ctx context.Context, dynClient dynamic.Interface, certs *web
 // ValidatingWebhookConfiguration unstructured object.  caCert must be a
 // PEM-encoded CA certificate; it is base64-encoded before being stored so
 // that json.Marshal produces the correct Kubernetes API wire format.
-func injectCABundle(obj *unstructured.Unstructured, caCert []byte) {
+// Returns an error if the webhooks field is missing or cannot be updated.
+func injectCABundle(obj *unstructured.Unstructured, caCert []byte) error {
 	webhooks, found, err := unstructured.NestedSlice(obj.Object, "webhooks")
-	if err != nil || !found {
-		return
+	if err != nil {
+		return fmt.Errorf("reading webhooks field from %s %q: %w", obj.GetKind(), obj.GetName(), err)
+	}
+	if !found {
+		return fmt.Errorf("%s %q has no webhooks field", obj.GetKind(), obj.GetName())
 	}
 
 	// base64-encode the PEM bytes: this is what the Kubernetes API stores in
@@ -359,7 +367,10 @@ func injectCABundle(obj *unstructured.Unstructured, caCert []byte) {
 		wh["clientConfig"] = cc
 		webhooks[i] = wh
 	}
-	_ = unstructured.SetNestedSlice(obj.Object, webhooks, "webhooks")
+	if err := unstructured.SetNestedSlice(obj.Object, webhooks, "webhooks"); err != nil {
+		return fmt.Errorf("setting webhooks on %s %q: %w", obj.GetKind(), obj.GetName(), err)
+	}
+	return nil
 }
 
 func boolPtr(b bool) *bool { return &b }
