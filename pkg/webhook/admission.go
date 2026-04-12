@@ -158,6 +158,12 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return evaluateApprovalCheck(*rule.ApprovalCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeAnnotationCheck:
+		if rule.AnnotationCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type AnnotationCheck but no annotationCheck config", rule.Name)
+		}
+		return evaluateAnnotationCheck(*rule.AnnotationCheck, rule.Message, req)
+
 	case ewv1alpha1.RuleTypeCheckLock:
 		return evaluateCheckLock(rule.Message, req)
 
@@ -549,6 +555,64 @@ func evaluateApprovalCheck(check ewv1alpha1.ApprovalCheck, message string, req a
 			message = fmt.Sprintf("approval annotation %q contains an invalid signature for resource path %q", annotationKey, path)
 		}
 		return true, message, nil
+	}
+
+	return false, "", nil
+}
+
+// evaluateAnnotationCheck denies the admission request unless the subject
+// resource carries the required annotation (and, when AnnotationValue is set,
+// the annotation has exactly that value).
+//
+// For DELETE requests the object being deleted is available in OldObject
+// rather than Object, so both are inspected.
+func evaluateAnnotationCheck(check ewv1alpha1.AnnotationCheck, message string, req admission.Request) (bool, string, error) {
+	// Prefer Object; fall back to OldObject for DELETE requests.
+	raw := req.Object.Raw
+	if len(raw) == 0 {
+		raw = req.OldObject.Raw
+	}
+	if len(raw) == 0 {
+		// No object data available – treat as annotation absent.
+		return true, message, nil
+	}
+
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return false, "", fmt.Errorf("unmarshalling object for annotation check: %w", err)
+	}
+
+	// Navigate metadata.annotations.
+	metadataRaw, ok := obj["metadata"]
+	if !ok || metadataRaw == nil {
+		// Object has no metadata; treat annotations as absent.
+		return true, message, nil
+	}
+	metadata, ok := metadataRaw.(map[string]interface{})
+	if !ok {
+		return false, "", fmt.Errorf("object metadata is not a map (got %T)", metadataRaw)
+	}
+
+	annotationsRaw, ok := metadata["annotations"]
+	if !ok || annotationsRaw == nil {
+		// No annotations present; treat annotation as absent.
+		return true, message, nil
+	}
+	annotations, ok := annotationsRaw.(map[string]interface{})
+	if !ok {
+		return false, "", fmt.Errorf("object metadata.annotations is not a map (got %T)", annotationsRaw)
+	}
+
+	val, present := annotations[check.AnnotationKey]
+	if !present {
+		return true, message, nil
+	}
+
+	if check.AnnotationValue != nil {
+		valStr, _ := val.(string)
+		if valStr != *check.AnnotationValue {
+			return true, message, nil
+		}
 	}
 
 	return false, "", nil

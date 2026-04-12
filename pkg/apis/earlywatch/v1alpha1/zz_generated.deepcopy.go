@@ -174,6 +174,11 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(ApprovalCheck)
 		**out = **in
 	}
+	if in.AnnotationCheck != nil {
+		in, out := &in.AnnotationCheck, &out.AnnotationCheck
+		*out = new(AnnotationCheck)
+		(*in).DeepCopyInto(*out)
+	}
 }
 
 // DeepCopy returns a deep copy of a GuardRule.
@@ -283,6 +288,27 @@ func (in *ApprovalCheck) DeepCopy() *ApprovalCheck {
 		return nil
 	}
 	out := new(ApprovalCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *AnnotationCheck) DeepCopyInto(out *AnnotationCheck) {
+	*out = *in
+	if in.AnnotationValue != nil {
+		in, out := &in.AnnotationValue, &out.AnnotationValue
+		*out = new(string)
+		**out = **in
+	}
+}
+
+// DeepCopy returns a deep copy of an AnnotationCheck.
+func (in *AnnotationCheck) DeepCopy() *AnnotationCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(AnnotationCheck)
 	in.DeepCopyInto(out)
 	return out
 }

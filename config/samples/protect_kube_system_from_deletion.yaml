@@ -1,0 +1,36 @@
+---
+# ChangeValidator that prevents the kube-system namespace from being deleted
+# unless the operator has explicitly added the confirm-delete annotation.
+#
+# To delete kube-system you must first annotate it:
+#
+#   kubectl annotate namespace kube-system earlywatch.io/confirm-delete=true
+#
+# Only after that annotation is present will a DELETE request be allowed
+# through by this guard.  This is intentionally a two-step process so that
+# an accidental `kubectl delete namespace kube-system` is always rejected.
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: protect-kube-system-from-deletion
+  # No namespace - this is a cluster-scoped guard so it intercepts DELETE
+  # requests against the Namespace resource regardless of which namespace the
+  # request targets.
+spec:
+  subject:
+    apiGroup: ""        # core API group
+    resource: namespaces
+    names:
+      - kube-system     # only protect this specific namespace
+  operations:
+    - DELETE
+  rules:
+    - name: require-confirm-delete-annotation
+      type: AnnotationCheck
+      annotationCheck:
+        annotationKey: "earlywatch.io/confirm-delete"
+        annotationValue: "true"
+      message: >
+        The kube-system namespace cannot be deleted without explicit confirmation.
+        Add the annotation "earlywatch.io/confirm-delete: true" to the namespace
+        before retrying the delete operation.

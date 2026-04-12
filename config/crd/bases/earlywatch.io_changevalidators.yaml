@@ -171,6 +171,7 @@ spec:
                           - ExpressionCheck
                           - NameReferenceCheck
                           - ApprovalCheck
+                          - AnnotationCheck
                           - CheckLock
                       message:
                         description: >
@@ -334,6 +335,27 @@ spec:
                               AnnotationKey is the annotation on the resource
                               whose value holds the base64-encoded approval
                               signature. Defaults to "earlywatch.io/approved".
+                            type: string
+                      annotationCheck:
+                        description: >
+                          AnnotationCheck denies the request when the subject
+                          resource does not carry a required annotation (with
+                          an optional specific value). Required when type is
+                          AnnotationCheck.
+                        type: object
+                        required:
+                          - annotationKey
+                        properties:
+                          annotationKey:
+                            description: >
+                              AnnotationKey is the annotation key that must be
+                              present on the resource.
+                            type: string
+                          annotationValue:
+                            description: >
+                              AnnotationValue, if specified, is the exact value
+                              that the annotation must have. When omitted, any
+                              value is accepted as long as the key is present.
                             type: string
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.
