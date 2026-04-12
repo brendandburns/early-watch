@@ -262,6 +262,30 @@ go test ./...
 
 ---
 
+## Development
+
+### Linting
+
+This project uses [golangci-lint](https://golangci-lint.run/) to enforce code style and catch common issues. The linter configuration lives in `.golangci.yml` and the full style guide is at [`docs/style-guide.md`](docs/style-guide.md).
+
+**Set up git hooks and install the linter (one-time):**
+
+```sh
+./scripts/install-hooks.sh
+```
+
+This configures git to run the linter automatically on every `git commit` and `git push`.
+
+**Run the linter manually:**
+
+```sh
+golangci-lint run --config .golangci.yml ./...
+```
+
+Linting is also enforced in CI — the `Lint` workflow runs on every pull request targeting `main`.
+
+---
+
 ## License
 
 See [LICENSE](LICENSE).

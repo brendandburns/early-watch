@@ -122,7 +122,6 @@ type AnnotationCheck struct {
 	AnnotationValue *string `json:"annotationValue,omitempty"`
 }
 
-
 // LockAnnotation is the annotation key that, when present on a resource,
 // prevents it from being deleted.  Any non-empty annotation value is treated
 // as a lock.
