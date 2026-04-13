@@ -28,10 +28,14 @@ on:
 
 jobs:
   watchctl-e2e:
-    name: Run watchctl CLI e2e tests
+    name: "watchctl e2e (${{ matrix.manual_touch && 'with' || 'without' }} manual-touch)"
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        manual_touch: [true, false]
 
     steps:
       - name: Checkout code
@@ -53,10 +57,30 @@ jobs:
         uses: helm/kind-action@v1.12.0
 
       - name: Test watchctl install
-        run: watchctl install --kubeconfig "$HOME/.kube/config" --manual-touch
+        env:
+          MANUAL_TOUCH: ${{ matrix.manual_touch }}
+        run: |
+          extra_flags=""
+          if [ "$MANUAL_TOUCH" = "true" ]; then
+            extra_flags="--manual-touch"
+          fi
+          watchctl install --kubeconfig "$HOME/.kube/config" $extra_flags
 
-      - name: Verify CRD was created
+      - name: Verify ChangeValidator CRD was created
         run: kubectl get crd changevalidators.earlywatch.io
+
+      - name: Verify ManualTouchEvent CRD was created
+        if: ${{ matrix.manual_touch }}
+        run: kubectl get crd manualtouchevents.earlywatch.io
+
+      - name: Verify ManualTouchEvent CRD was not created
+        if: ${{ !matrix.manual_touch }}
+        run: |
+          if kubectl get crd manualtouchevents.earlywatch.io 2>/dev/null; then
+            echo "ERROR: ManualTouchEvent CRD should not exist without --manual-touch"
+            exit 1
+          fi
+          echo "ManualTouchEvent CRD correctly absent"
 
       - name: Verify namespace was created
         run: kubectl get namespace early-watch-system
@@ -74,6 +98,7 @@ jobs:
         run: kubectl get changevalidator protect-configmap-from-deletion -n default
 
       - name: Test watchctl list-touches
+        if: ${{ matrix.manual_touch }}
         run: watchctl list-touches --kubeconfig "$HOME/.kube/config"
 
       - name: Test watchctl approve
@@ -102,15 +127,31 @@ jobs:
           echo "Approval annotation set successfully: ${sig:0:20}..."
 
       - name: Test watchctl uninstall
-        run: watchctl uninstall --kubeconfig "$HOME/.kube/config" --manual-touch
+        env:
+          MANUAL_TOUCH: ${{ matrix.manual_touch }}
+        run: |
+          extra_flags=""
+          if [ "$MANUAL_TOUCH" = "true" ]; then
+            extra_flags="--manual-touch"
+          fi
+          watchctl uninstall --kubeconfig "$HOME/.kube/config" $extra_flags
 
-      - name: Verify CRD was removed
+      - name: Verify ChangeValidator CRD was removed
         run: |
           if kubectl get crd changevalidators.earlywatch.io 2>/dev/null; then
-            echo "ERROR: CRD still exists after uninstall"
+            echo "ERROR: ChangeValidator CRD still exists after uninstall"
             exit 1
           fi
-          echo "CRD successfully removed"
+          echo "ChangeValidator CRD successfully removed"
+
+      - name: Verify ManualTouchEvent CRD was removed
+        if: ${{ matrix.manual_touch }}
+        run: |
+          if kubectl get crd manualtouchevents.earlywatch.io 2>/dev/null; then
+            echo "ERROR: ManualTouchEvent CRD still exists after uninstall --manual-touch"
+            exit 1
+          fi
+          echo "ManualTouchEvent CRD successfully removed"
 
       - name: Verify namespace was removed
         run: |
