@@ -53,7 +53,7 @@ jobs:
         uses: helm/kind-action@v1.12.0
 
       - name: Test watchctl install
-        run: watchctl install --kubeconfig "$HOME/.kube/config"
+        run: watchctl install --kubeconfig "$HOME/.kube/config" --manual-touch
 
       - name: Verify CRD was created
         run: kubectl get crd changevalidators.earlywatch.io
@@ -102,7 +102,7 @@ jobs:
           echo "Approval annotation set successfully: ${sig:0:20}..."
 
       - name: Test watchctl uninstall
-        run: watchctl uninstall --kubeconfig "$HOME/.kube/config"
+        run: watchctl uninstall --kubeconfig "$HOME/.kube/config" --manual-touch
 
       - name: Verify CRD was removed
         run: |
