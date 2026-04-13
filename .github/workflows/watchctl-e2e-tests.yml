@@ -1,0 +1,192 @@
+name: watchctl CLI E2E Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/watchctl/**'
+      - 'pkg/install/**'
+      - 'pkg/add/**'
+      - 'pkg/approve/**'
+      - 'pkg/listtouches/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/watchctl-e2e-tests.yml'
+      - 'config/samples/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/watchctl/**'
+      - 'pkg/install/**'
+      - 'pkg/add/**'
+      - 'pkg/approve/**'
+      - 'pkg/listtouches/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/watchctl-e2e-tests.yml'
+      - 'config/samples/**'
+
+jobs:
+  build:
+    name: Build watchctl
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build watchctl
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bin"
+          go build -o "$GITHUB_WORKSPACE/bin/watchctl" ./cmd/watchctl
+
+      - name: Upload watchctl binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: watchctl-${{ github.sha }}
+          path: bin/watchctl
+          retention-days: 1
+
+  watchctl-e2e:
+    name: "watchctl e2e (${{ matrix.manual_touch && 'with' || 'without' }} manual-touch)"
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        manual_touch: [true, false]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download watchctl binary
+        uses: actions/download-artifact@v4
+        with:
+          name: watchctl-${{ github.sha }}
+          path: bin
+
+      - name: Make watchctl executable
+        run: |
+          chmod +x bin/watchctl
+          echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.12.0
+
+      - name: Test watchctl install
+        env:
+          MANUAL_TOUCH: ${{ matrix.manual_touch }}
+        run: |
+          extra_flags=""
+          if [ "$MANUAL_TOUCH" = "true" ]; then
+            extra_flags="--manual-touch"
+          fi
+          watchctl install --kubeconfig "$HOME/.kube/config" $extra_flags
+
+      - name: Verify ChangeValidator CRD was created
+        run: kubectl get crd changevalidators.earlywatch.io
+
+      - name: Verify ManualTouchEvent CRD was created
+        if: ${{ matrix.manual_touch }}
+        run: kubectl get crd manualtouchevents.earlywatch.io
+
+      - name: Verify ManualTouchEvent CRD was not created
+        if: ${{ !matrix.manual_touch }}
+        run: |
+          if kubectl get crd manualtouchevents.earlywatch.io 2>/dev/null; then
+            echo "ERROR: ManualTouchEvent CRD should not exist without --manual-touch"
+            exit 1
+          fi
+          echo "ManualTouchEvent CRD correctly absent"
+
+      - name: Verify namespace was created
+        run: kubectl get namespace early-watch-system
+
+      - name: Verify webhook Deployment was created
+        run: kubectl get deployment early-watch-webhook -n early-watch-system
+
+      - name: Verify ValidatingWebhookConfiguration was created
+        run: kubectl get validatingwebhookconfiguration early-watch-validating-webhook
+
+      - name: Test watchctl add with a sample manifest
+        run: watchctl add --kubeconfig "$HOME/.kube/config" config/samples/protect_configmap_from_deletion.yaml
+
+      - name: Verify ChangeValidator was created
+        run: kubectl get changevalidator protect-configmap-from-deletion -n default
+
+      - name: Test watchctl list-touches
+        if: ${{ matrix.manual_touch }}
+        run: watchctl list-touches --kubeconfig "$HOME/.kube/config"
+
+      - name: Test watchctl approve
+        run: |
+          # Generate an RSA private key for testing (PKCS#8 format)
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/test-key.pem
+
+          # Create a ConfigMap to sign
+          kubectl create configmap test-approval --from-literal=key=value
+
+          # Sign and annotate the ConfigMap
+          watchctl approve \
+            --kubeconfig "$HOME/.kube/config" \
+            --private-key /tmp/test-key.pem \
+            --resource configmaps \
+            --namespace default \
+            --name test-approval
+
+          # Verify the approval annotation was written
+          sig=$(kubectl get configmap test-approval \
+            -o jsonpath='{.metadata.annotations.earlywatch\.io/approved}')
+          if [ -z "$sig" ]; then
+            echo "ERROR: approval annotation not found on ConfigMap"
+            exit 1
+          fi
+          echo "Approval annotation set successfully: ${sig:0:20}..."
+
+      - name: Test watchctl uninstall
+        env:
+          MANUAL_TOUCH: ${{ matrix.manual_touch }}
+        run: |
+          extra_flags=""
+          if [ "$MANUAL_TOUCH" = "true" ]; then
+            extra_flags="--manual-touch"
+          fi
+          watchctl uninstall --kubeconfig "$HOME/.kube/config" $extra_flags
+
+      - name: Verify ChangeValidator CRD was removed
+        run: |
+          if kubectl get crd changevalidators.earlywatch.io 2>/dev/null; then
+            echo "ERROR: ChangeValidator CRD still exists after uninstall"
+            exit 1
+          fi
+          echo "ChangeValidator CRD successfully removed"
+
+      - name: Verify ManualTouchEvent CRD was removed
+        if: ${{ matrix.manual_touch }}
+        run: |
+          if kubectl get crd manualtouchevents.earlywatch.io 2>/dev/null; then
+            echo "ERROR: ManualTouchEvent CRD still exists after uninstall --manual-touch"
+            exit 1
+          fi
+          echo "ManualTouchEvent CRD successfully removed"
+
+      - name: Verify namespace was removed
+        run: |
+          if ! kubectl get namespace early-watch-system >/dev/null 2>&1; then
+            echo "Namespace successfully removed"
+            exit 0
+          fi
+          kubectl wait --for=delete namespace/early-watch-system --timeout=60s \
+            || { echo "ERROR: Namespace early-watch-system still exists after uninstall"; exit 1; }
+          echo "Namespace successfully removed"
