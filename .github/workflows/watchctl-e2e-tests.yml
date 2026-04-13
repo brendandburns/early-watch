@@ -27,15 +27,11 @@ on:
       - 'config/samples/**'
 
 jobs:
-  watchctl-e2e:
-    name: "watchctl e2e (${{ matrix.manual_touch && 'with' || 'without' }} manual-touch)"
+  build:
+    name: Build watchctl
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        manual_touch: [true, false]
 
     steps:
       - name: Checkout code
@@ -51,6 +47,38 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/bin"
           go build -o "$GITHUB_WORKSPACE/bin/watchctl" ./cmd/watchctl
+
+      - name: Upload watchctl binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: watchctl
+          path: bin/watchctl
+          retention-days: 1
+
+  watchctl-e2e:
+    name: "watchctl e2e (${{ matrix.manual_touch && 'with' || 'without' }} manual-touch)"
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        manual_touch: [true, false]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download watchctl binary
+        uses: actions/download-artifact@v4
+        with:
+          name: watchctl
+          path: bin
+
+      - name: Make watchctl executable
+        run: |
+          chmod +x bin/watchctl
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
 
       - name: Create kind cluster
