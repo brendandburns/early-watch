@@ -2,7 +2,7 @@
 # post-create.sh — set up the development environment after the devcontainer is created.
 set -euo pipefail
 
-GOLANGCI_LINT_VERSION="v1.64.8"
+GOLANGCI_LINT_VERSION="v2.11.4"
 KIND_VERSION="v0.27.0"
 
 echo "==> Installing golangci-lint ${GOLANGCI_LINT_VERSION}..."

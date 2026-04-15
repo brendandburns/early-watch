@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-GOLANGCI_LINT_VERSION="v1.64.8"
+GOLANGCI_LINT_VERSION="v2.11.4"
 
 echo "==> Configuring git to use .githooks directory..."
 git -C "${REPO_ROOT}" config core.hooksPath .githooks
