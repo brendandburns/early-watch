@@ -1,6 +1,6 @@
 {
   "name": "early-watch",
-  "image": "mcr.microsoft.com/devcontainers/go:1-1.26",
+  "image": "mcr.microsoft.com/devcontainers/go:1-1.24",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {},
     "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
