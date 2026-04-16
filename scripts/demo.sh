@@ -71,7 +71,6 @@ print_cmd() {
 pause() {
   echo ""
   echo -n "${DIM}   Press Enter to continue...${RESET}"
-  # shellcheck disable=SC2162
   read -r _
 }
 
@@ -90,14 +89,14 @@ cleanup() {
   fi
   echo ""
   echo "${YELLOW}Cleaning up demo resources...${RESET}"
-  kubectl delete service  demo-service  --ignore-not-found=true 2>/dev/null || true
-  kubectl delete pod       demo-pod      --ignore-not-found=true 2>/dev/null || true
-  kubectl delete configmap demo-config   --ignore-not-found=true 2>/dev/null || true
-  kubectl delete deployment demo-app     --ignore-not-found=true 2>/dev/null || true
-  kubectl delete changevalidator protect-service-from-deletion        -n default --ignore-not-found=true 2>/dev/null || true
-  kubectl delete changevalidator protect-configmap-from-deletion      -n default --ignore-not-found=true 2>/dev/null || true
-  "$WATCHCTL" uninstall --kubeconfig "$HOME/.kube/config" 2>/dev/null || true
-  kind delete cluster --name "$CLUSTER_NAME" 2>/dev/null || true
+  kubectl delete service     demo-service --ignore-not-found=true
+  kubectl delete pod          demo-pod     --ignore-not-found=true
+  kubectl delete configmap    demo-config  --ignore-not-found=true
+  kubectl delete deployment   demo-app     --ignore-not-found=true
+  kubectl delete changevalidator protect-service-from-deletion   -n default --ignore-not-found=true
+  kubectl delete changevalidator protect-configmap-from-deletion -n default --ignore-not-found=true
+  "$WATCHCTL" uninstall --kubeconfig "$HOME/.kube/config" || true
+  kind delete cluster --name "$CLUSTER_NAME"
   print_success "Cleanup complete."
 }
 trap cleanup EXIT
@@ -110,7 +109,7 @@ cat <<'BANNER'
  | |__   __ _ _ __| |_   _ \ \  /\  / /_ | |_ ___| |__
  |  __| / _` | '__| | | | | \ \/  \/ / _\| __/ __| '_ \
  | |___| (_| | |  | | |_| |  \  /\  / (_| | || (__| | | |
- |______\__,_|_|  |_|\__, |   \/  \/ \__,_|\__\___|_| |_|
+ |______\__,_|_|  |_|\__, |   \/  \/ \__,_|\__/\___|_| |_|
                        __/ |
                       |___/    Interactive Demo
 BANNER
