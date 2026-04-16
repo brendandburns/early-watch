@@ -14,7 +14,7 @@
 # Prerequisites (all must be on your PATH):
 #   • kind    — https://kind.sigs.k8s.io/docs/user/quick-start/#installation
 #   • kubectl — https://kubernetes.io/docs/tasks/tools/
-#   • go      — https://go.dev/doc/install  (1.21+)
+#   • go      — https://go.dev/doc/install  (see go.mod for the required version)
 #   • docker  — https://docs.docker.com/get-docker/
 #
 # Usage:
