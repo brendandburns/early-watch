@@ -16,9 +16,18 @@ case "${ARCH}" in
   aarch64) KIND_ARCH="arm64" ;;
   *)       KIND_ARCH="${ARCH}" ;;
 esac
+mkdir -p "${HOME}/.local/bin"
 curl -sSfL "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${KIND_ARCH}" \
-  -o /usr/local/bin/kind
-chmod +x /usr/local/bin/kind
+  -o "${HOME}/.local/bin/kind"
+chmod +x "${HOME}/.local/bin/kind"
+
+echo "==> Adding ~/.local/bin to PATH..."
+for rc in "${HOME}/.bashrc" "${HOME}/.profile"; do
+  if ! grep -qF 'export PATH="${HOME}/.local/bin:${PATH}"' "${rc}" 2>/dev/null; then
+    echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${rc}"
+  fi
+done
+export PATH="${HOME}/.local/bin:${PATH}"
 
 echo "==> Installing Go tools..."
 go install golang.org/x/tools/cmd/goimports@latest
