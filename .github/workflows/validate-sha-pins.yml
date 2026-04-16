@@ -1,0 +1,44 @@
+name: Validate SHA-pinned Actions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/*.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/*.yml'
+
+jobs:
+  validate-sha-pins:
+    name: Check all actions are SHA-pinned
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Validate all uses directives are pinned to a SHA
+        run: |
+          failed=false
+          for file in .github/workflows/*.yml; do
+            while IFS= read -r line; do
+              if echo "$line" | grep -qE '^\s+uses:\s+'; then
+                ref=$(echo "$line" | sed -E 's/.*uses:\s+[^@]+@([^ #]+).*/\1/')
+                if ! echo "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+                  echo "ERROR: $file: action not pinned to a SHA: $line"
+                  failed=true
+                fi
+              fi
+            done < "$file"
+          done
+          if [ "$failed" = "true" ]; then
+            echo ""
+            echo "All 'uses:' directives must be pinned to a full 40-character commit SHA."
+            echo "Example: uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4"
+            exit 1
+          fi
+          echo "All actions are pinned to a commit SHA."
