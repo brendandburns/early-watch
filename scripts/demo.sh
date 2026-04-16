@@ -1,29 +1,24 @@
 #!/usr/bin/env bash
-# demo.sh — Interactive walkthrough of EarlyWatch on a local kind cluster.
+# demo.sh — Interactive EarlyWatch demo scenarios.
 #
-# This script installs EarlyWatch onto a fresh kind cluster and demonstrates
-# how ChangeValidators protect Kubernetes resources from unsafe deletions.
+# This script walks through two concrete examples of EarlyWatch protecting
+# Kubernetes resources from unsafe deletions.
 #
-# Prerequisites (all must be on your PATH):
-#   • kind   — https://kind.sigs.k8s.io/docs/user/quick-start/#installation
-#   • kubectl — https://kubernetes.io/docs/tasks/tools/
-#   • go     — https://go.dev/doc/install  (1.21+)
-#   • docker — https://docs.docker.com/get-docker/
+# Run scripts/demo-setup.sh first to create the kind cluster and install
+# EarlyWatch, then run this script to walk through the demo scenarios.
 #
 # Usage:
-#   bash scripts/demo.sh [--skip-cluster-create] [--skip-cleanup]
+#   bash scripts/demo.sh [--skip-cleanup]
 #
-#   --skip-cluster-create  Reuse the existing kind cluster "earlywatch-demo"
-#   --skip-cleanup         Leave the cluster running after the demo finishes
+#   --skip-cleanup  Leave the kind cluster running after the demo finishes.
+#                   Useful if you want to explore further after the demo.
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
-SKIP_CLUSTER_CREATE=false
 SKIP_CLEANUP=false
 for arg in "$@"; do
   case "$arg" in
-    --skip-cluster-create) SKIP_CLUSTER_CREATE=true ;;
-    --skip-cleanup)        SKIP_CLEANUP=true ;;
+    --skip-cleanup) SKIP_CLEANUP=true ;;
   esac
 done
 
@@ -89,10 +84,10 @@ cleanup() {
   fi
   echo ""
   echo "${YELLOW}Cleaning up demo resources...${RESET}"
-  kubectl delete service     demo-service --ignore-not-found=true
-  kubectl delete pod          demo-pod     --ignore-not-found=true
-  kubectl delete configmap    demo-config  --ignore-not-found=true
-  kubectl delete deployment   demo-app     --ignore-not-found=true
+  kubectl delete service        demo-service --ignore-not-found=true
+  kubectl delete pod            demo-pod     --ignore-not-found=true
+  kubectl delete configmap      demo-config  --ignore-not-found=true
+  kubectl delete deployment     demo-app     --ignore-not-found=true
   kubectl delete changevalidator protect-service-from-deletion   -n default --ignore-not-found=true
   kubectl delete changevalidator protect-configmap-from-deletion -n default --ignore-not-found=true
   "$WATCHCTL" uninstall --kubeconfig "$HOME/.kube/config" || true
@@ -100,6 +95,19 @@ cleanup() {
   print_success "Cleanup complete."
 }
 trap cleanup EXIT
+
+# ── Verify setup has been run ────────────────────────────────────────────────
+if ! kubectl get namespace early-watch-system &>/dev/null; then
+  echo "${RED}Error: EarlyWatch does not appear to be installed.${RESET}"
+  echo "Run ${BOLD}scripts/demo-setup.sh${RESET} first, then re-run this script."
+  exit 1
+fi
+
+if [ ! -x "$WATCHCTL" ]; then
+  echo "${RED}Error: watchctl binary not found at $WATCHCTL${RESET}"
+  echo "Run ${BOLD}scripts/demo-setup.sh${RESET} first to build it."
+  exit 1
+fi
 
 # ── Welcome banner ───────────────────────────────────────────────────────────
 clear
@@ -121,137 +129,14 @@ echo "change-safety rules — it prevents you from accidentally breaking"
 echo "your cluster by deleting resources that are still in use."
 echo ""
 echo "During this demo you will see:"
-echo "  1. EarlyWatch installed onto a local kind cluster"
-echo "  2. A Service blocked from deletion because matching Pods are running"
-echo "  3. A ConfigMap blocked from deletion because a Deployment references it"
-echo "  4. Both deletions successfully completing once dependencies are removed"
+echo "  1. A Service blocked from deletion because matching Pods are running"
+echo "  2. A ConfigMap blocked from deletion because a Deployment references it"
+echo "  3. Both deletions successfully completing once dependencies are removed"
 echo ""
-echo "${DIM}Estimated run time: ~5 minutes${RESET}"
+echo "${DIM}Estimated run time: ~3 minutes${RESET}"
 pause
 
-# ── Step 0: Prerequisite check ───────────────────────────────────────────────
-print_header "Step 0 — Checking Prerequisites"
-print_info "We need kind, kubectl, go, and docker to be installed and accessible."
-pause
-
-MISSING=()
-for tool in kind kubectl go docker; do
-  if command -v "$tool" &>/dev/null; then
-    print_success "$tool found at $(command -v "$tool")"
-  else
-    print_error "$tool not found"
-    MISSING+=("$tool")
-  fi
-done
-
-if [ ${#MISSING[@]} -gt 0 ]; then
-  echo ""
-  print_error "Missing tools: ${MISSING[*]}"
-  echo "Please install the missing tools and re-run the demo."
-  exit 1
-fi
-
-echo ""
-print_success "All prerequisites satisfied."
-pause
-
-# ── Step 1: Create kind cluster ──────────────────────────────────────────────
-print_header "Step 1 — Create a Local Kubernetes Cluster with kind"
-print_info "kind (Kubernetes IN Docker) spins up a full Kubernetes cluster"
-print_info "inside Docker containers on your local machine. We will create"
-print_info "a single-node cluster named '${CLUSTER_NAME}'."
-print_info ""
-print_info "Expected outcome: a running cluster and a kubeconfig entry for it."
-pause
-
-if [ "$SKIP_CLUSTER_CREATE" = "true" ]; then
-  print_info "Skipping cluster creation (--skip-cluster-create was set)."
-  run_cmd kind export kubeconfig --name "$CLUSTER_NAME"
-else
-  if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-    print_info "Cluster '${CLUSTER_NAME}' already exists — reusing it."
-    run_cmd kind export kubeconfig --name "$CLUSTER_NAME"
-  else
-    run_cmd kind create cluster --name "$CLUSTER_NAME" --wait 60s
-  fi
-fi
-
-echo ""
-print_success "Cluster '${CLUSTER_NAME}' is ready."
-echo ""
-print_info "Current cluster nodes:"
-run_cmd kubectl get nodes
-pause
-
-# ── Step 2: Build watchctl ───────────────────────────────────────────────────
-print_header "Step 2 — Build the watchctl CLI"
-print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
-print_info "uninstall EarlyWatch on any cluster in a single command."
-print_info ""
-print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
-pause
-
-cd "$REPO_ROOT"
-run_cmd go build -o watchctl ./cmd/watchctl/...
-
-print_success "watchctl built successfully at $WATCHCTL"
-pause
-
-# ── Step 3: Install EarlyWatch ───────────────────────────────────────────────
-print_header "Step 3 — Install EarlyWatch onto the Cluster"
-print_info "watchctl install applies the following resources in one go:"
-print_info "  • ChangeValidator CRD  — defines the custom resource type"
-print_info "  • RBAC (ClusterRole + ClusterRoleBinding + ServiceAccount)"
-print_info "  • Webhook Deployment   — the admission controller pod"
-print_info "  • Webhook Service      — exposes the controller inside the cluster"
-print_info "  • ValidatingWebhookConfiguration — registers with the API server"
-print_info ""
-print_info "The install is idempotent; running it twice is safe."
-print_info ""
-print_info "Expected outcome: all EarlyWatch components are Running in the"
-print_info "'early-watch-system' namespace."
-pause
-
-run_cmd "$WATCHCTL" install --kubeconfig "$HOME/.kube/config"
-
-echo ""
-print_info "Waiting for the webhook deployment to become ready (up to 120s)..."
-run_cmd kubectl rollout status deployment/early-watch-webhook \
-  -n early-watch-system --timeout=120s
-
-print_success "EarlyWatch is installed and ready."
-pause
-
-# ── Step 4: Inspect installed resources ─────────────────────────────────────
-print_header "Step 4 — Inspect the Installed Resources"
-print_info "Let's take a look at what was created."
-print_info ""
-print_info "You should see:"
-print_info "  • The 'early-watch-system' namespace"
-print_info "  • The webhook pod in a Running state"
-print_info "  • The 'changevalidators.earlywatch.io' CRD"
-print_info "  • The ValidatingWebhookConfiguration that hooks into the API server"
-pause
-
-echo ""
-echo "${BOLD}Namespace:${RESET}"
-run_cmd kubectl get namespace early-watch-system
-
-echo ""
-echo "${BOLD}Pods in early-watch-system:${RESET}"
-run_cmd kubectl get pods -n early-watch-system
-
-echo ""
-echo "${BOLD}ChangeValidator CRD:${RESET}"
-run_cmd kubectl get crd changevalidators.earlywatch.io
-
-echo ""
-echo "${BOLD}ValidatingWebhookConfiguration:${RESET}"
-run_cmd kubectl get validatingwebhookconfiguration early-watch-validating-webhook
-
-pause
-
-# ── Step 5: Demo 1 — Protect a Service ──────────────────────────────────────
+# ── Demo 1 — Protect a Service ───────────────────────────────────────────────
 print_header "Demo 1 — Protect a Service from Deletion"
 print_info "Scenario: you have a Service and Pods that it routes traffic to."
 print_info "EarlyWatch should prevent you from deleting the Service while"
@@ -264,8 +149,8 @@ print_info "  c) Try to delete the Service — expect a DENIAL from EarlyWatch"
 print_info "  d) Delete the Pod first, then retry — the deletion succeeds"
 pause
 
-# 5a — Create Service and Pod
-print_step "5a — Creating Service 'demo-service' and a matching Pod..."
+# 1a — Create Service and Pod
+print_step "1a — Creating Service 'demo-service' and a matching Pod..."
 print_info "The Service selects Pods with the label 'app=demo'. We will"
 print_info "create one such Pod so the Service has active traffic targets."
 pause
@@ -308,8 +193,8 @@ run_cmd kubectl get pod demo-pod -o wide
 
 pause
 
-# 5b — Apply ChangeValidator
-print_step "5b — Applying the 'protect-service-from-deletion' ChangeValidator..."
+# 1b — Apply ChangeValidator
+print_step "1b — Applying the 'protect-service-from-deletion' ChangeValidator..."
 print_info "This ChangeValidator tells EarlyWatch: 'Deny any DELETE on a Service"
 print_info "in the default namespace if Pods matching its spec.selector exist.'"
 pause
@@ -322,8 +207,8 @@ run_cmd kubectl get changevalidator protect-service-from-deletion -n default
 
 pause
 
-# 5c — Try deleting the Service (should fail)
-print_step "5c — Attempting to delete 'demo-service' (this should be DENIED)..."
+# 1c — Try deleting the Service (should fail)
+print_step "1c — Attempting to delete 'demo-service' (this should be DENIED)..."
 print_info "EarlyWatch will intercept the DELETE request and check whether any"
 print_info "Pods with matching labels exist. Because 'demo-pod' is running with"
 print_info "'app=demo', the deletion will be denied with a clear error message."
@@ -340,8 +225,8 @@ fi
 
 pause
 
-# 5d — Delete the Pod, then retry
-print_step "5d — Deleting 'demo-pod' first, then retrying the Service deletion..."
+# 1d — Delete the Pod, then retry
+print_step "1d — Deleting 'demo-pod' first, then retrying the Service deletion..."
 print_info "Once the matching Pod is gone there is nothing left to protect."
 print_info "EarlyWatch will re-evaluate the rules and this time allow the deletion."
 print_info ""
@@ -362,7 +247,7 @@ fi
 
 pause
 
-# ── Step 6: Demo 2 — Protect a ConfigMap ────────────────────────────────────
+# ── Demo 2 — Protect a ConfigMap ────────────────────────────────────────────
 print_header "Demo 2 — Protect a ConfigMap Referenced by a Deployment"
 print_info "Scenario: you have a ConfigMap that is mounted as environment"
 print_info "variables into a Deployment. Deleting that ConfigMap would cause"
@@ -375,8 +260,8 @@ print_info "  c) Try to delete the ConfigMap — expect a DENIAL"
 print_info "  d) Delete the Deployment first, then retry — the deletion succeeds"
 pause
 
-# 6a — Create ConfigMap and Deployment
-print_step "6a — Creating ConfigMap 'demo-config' and a Deployment that references it..."
+# 2a — Create ConfigMap and Deployment
+print_step "2a — Creating ConfigMap 'demo-config' and a Deployment that references it..."
 pause
 
 run_cmd kubectl apply -f - <<'EOF'
@@ -420,8 +305,8 @@ run_cmd kubectl get deployment demo-app
 
 pause
 
-# 6b — Apply ChangeValidator
-print_step "6b — Applying the 'protect-configmap-from-deletion' ChangeValidator..."
+# 2b — Apply ChangeValidator
+print_step "2b — Applying the 'protect-configmap-from-deletion' ChangeValidator..."
 print_info "This rule checks whether any Deployment, DaemonSet, or CronJob in the"
 print_info "same namespace references the ConfigMap being deleted."
 pause
@@ -434,8 +319,8 @@ run_cmd kubectl get changevalidator protect-configmap-from-deletion -n default
 
 pause
 
-# 6c — Try deleting the ConfigMap (should fail)
-print_step "6c — Attempting to delete 'demo-config' (this should be DENIED)..."
+# 2c — Try deleting the ConfigMap (should fail)
+print_step "2c — Attempting to delete 'demo-config' (this should be DENIED)..."
 print_info "EarlyWatch scans all Deployments, DaemonSets, and CronJobs in the"
 print_info "'default' namespace for references to 'demo-config'. It finds"
 print_info "'demo-app' using it via envFrom, so the deletion is denied."
@@ -452,8 +337,8 @@ fi
 
 pause
 
-# 6d — Delete Deployment, then retry
-print_step "6d — Deleting 'demo-app' Deployment, then retrying the ConfigMap deletion..."
+# 2d — Delete Deployment, then retry
+print_step "2d — Deleting 'demo-app' Deployment, then retrying the ConfigMap deletion..."
 print_info "Once the Deployment is gone there are no more references to 'demo-config'."
 print_info ""
 print_info "Expected outcome: the ConfigMap deletion succeeds."
@@ -472,8 +357,8 @@ fi
 
 pause
 
-# ── Step 7: Uninstall ────────────────────────────────────────────────────────
-print_header "Step 7 — Uninstall EarlyWatch"
+# ── Uninstall ────────────────────────────────────────────────────────────────
+print_header "Uninstall EarlyWatch"
 print_info "watchctl uninstall removes all EarlyWatch components from the cluster"
 print_info "in the correct order: first the ValidatingWebhookConfiguration (so no"
 print_info "more requests are intercepted), then the Deployment, Service, RBAC,"
@@ -504,7 +389,6 @@ pause
 print_header "Demo Complete!"
 echo ""
 echo "You have seen EarlyWatch:"
-echo "  ${GREEN}✔${RESET}  Installed onto a kind cluster with a single command"
 echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
 echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
 echo "  ${GREEN}✔${RESET}  Allowing deletions once their dependencies are cleaned up"
