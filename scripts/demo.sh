@@ -6,12 +6,13 @@
 #
 # Run scripts/demo-setup.sh first to create the kind cluster and install
 # EarlyWatch, then run this script to walk through the demo scenarios.
+# To tear everything down afterwards, run scripts/demo-teardown.sh.
 #
 # Usage:
 #   bash scripts/demo.sh [--skip-cleanup]
 #
-#   --skip-cleanup  Leave the kind cluster running after the demo finishes.
-#                   Useful if you want to explore further after the demo.
+#   --skip-cleanup  Skip automatic teardown when the script exits.
+#                   Run scripts/demo-teardown.sh manually to clean up later.
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
@@ -31,20 +32,10 @@ cleanup() {
   if [ "$SKIP_CLEANUP" = "true" ]; then
     echo ""
     print_info "Skipping cleanup (--skip-cleanup was set)."
-    print_info "Run 'kind delete cluster --name $CLUSTER_NAME' to remove the cluster."
+    print_info "Run 'bash scripts/demo-teardown.sh' to clean up when you are done."
     return
   fi
-  echo ""
-  echo "${YELLOW}Cleaning up demo resources...${RESET}"
-  kubectl delete service        demo-service --ignore-not-found=true
-  kubectl delete pod            demo-pod     --ignore-not-found=true
-  kubectl delete configmap      demo-config  --ignore-not-found=true
-  kubectl delete deployment     demo-app     --ignore-not-found=true
-  kubectl delete changevalidator protect-service-from-deletion   -n default --ignore-not-found=true
-  kubectl delete changevalidator protect-configmap-from-deletion -n default --ignore-not-found=true
-  "$WATCHCTL" uninstall --kubeconfig "$HOME/.kube/config" || true
-  kind delete cluster --name "$CLUSTER_NAME"
-  print_success "Cleanup complete."
+  bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
 }
 trap cleanup EXIT
 
@@ -354,5 +345,5 @@ echo ""
 echo "${DIM}docs/getting-started.md has a full walkthrough with more examples.${RESET}"
 echo ""
 
-# The EXIT trap calls cleanup() automatically when the script exits.
-# Nothing else needed here.
+# The EXIT trap calls cleanup() automatically when the script exits, which
+# in turn runs demo-teardown.sh unless --skip-cleanup was passed.
