@@ -66,6 +66,14 @@ type Options struct {
 	// Deployment. Only used when ManualTouchInstall is true.
 	// Defaults to defaultAuditMonitorImage when empty.
 	AuditMonitorImage string
+	// APIServerCertSigning, when true, provisions the webhook TLS
+	// certificate using the Kubernetes built-in
+	// CertificateSigningRequest API and stores the result in a Secret.
+	// When false, the install step relies on cert-manager (or another
+	// external CA) to populate the Secret and inject the caBundle into the
+	// ValidatingWebhookConfiguration. The CLI may default this to true, but
+	// library callers using Options{} must set it explicitly.
+	APIServerCertSigning bool
 }
 
 // Run applies all EarlyWatch infrastructure manifests to the cluster
@@ -112,7 +120,21 @@ func Run(opts Options) error {
 		defaultWebhookImage: opts.Image,
 		defaultNamespace:    opts.Namespace,
 	}
-	if err := applyManifestDir(ctx, dynClient, mapper, "manifests", replacements); err != nil {
+
+	// When using API-server cert signing, strip the cert-manager annotation
+	// from the ValidatingWebhookConfiguration so cert-manager (if not
+	// installed) does not leave the caBundle unpopulated.
+	var manifestMutator func(*unstructured.Unstructured)
+	if opts.APIServerCertSigning {
+		manifestMutator = func(obj *unstructured.Unstructured) {
+			stampManagedBy(obj)
+			if obj.GetKind() == "ValidatingWebhookConfiguration" {
+				removeCertManagerAnnotation(obj)
+			}
+		}
+	}
+
+	if err := applyManifestDir(ctx, dynClient, mapper, "manifests", replacements, manifestMutator); err != nil {
 		return err
 	}
 
@@ -122,8 +144,18 @@ func Run(opts Options) error {
 			defaultAuditMonitorImage: opts.AuditMonitorImage,
 			defaultNamespace:         opts.Namespace,
 		}
-		if err := applyManifestDir(ctx, dynClient, mapper, "manifests/manual-touch", mtReplacements); err != nil {
+		if err := applyManifestDir(ctx, dynClient, mapper, "manifests/manual-touch", mtReplacements, nil); err != nil {
 			return err
+		}
+	}
+
+	// Provision the webhook TLS certificate using a self-signed CA and inject
+	// the CA certificate into the ValidatingWebhookConfiguration caBundle so
+	// the API server can verify the webhook server's certificate.
+	if opts.APIServerCertSigning {
+		fmt.Println("Provisioning webhook TLS certificate via self-signed CA...")
+		if err := provisionWebhookCert(ctx, cfg, opts.Namespace); err != nil {
+			return fmt.Errorf("provisioning webhook TLS certificate: %w", err)
 		}
 	}
 
@@ -134,8 +166,14 @@ func Run(opts Options) error {
 // applyManifestDir reads all manifest files from dir within the embedded FS,
 // applies the given string replacements, and SSA-applies each manifest to the
 // cluster. The replacements map is applied only when the old value differs from
-// the new value.
-func applyManifestDir(ctx context.Context, dynClient dynamic.Interface, mapper *restmapper.DeferredDiscoveryRESTMapper, dir string, replacements map[string]string) error {
+// the new value. mutator, when non-nil, is called on each decoded object before
+// it is applied; when nil a default mutator that stamps the managed-by
+// annotation is used.
+func applyManifestDir(ctx context.Context, dynClient dynamic.Interface, mapper *restmapper.DeferredDiscoveryRESTMapper, dir string, replacements map[string]string, mutator func(*unstructured.Unstructured)) error {
+	if mutator == nil {
+		mutator = stampManagedBy
+	}
+
 	entries, err := fs.ReadDir(manifestsFS, dir)
 	if err != nil {
 		return fmt.Errorf("reading embedded manifests directory %q: %w", dir, err)
@@ -157,13 +195,23 @@ func applyManifestDir(ctx context.Context, dynClient dynamic.Interface, mapper *
 			}
 		}
 
-		if err := internalapply.Manifest(ctx, dynClient, mapper, data, entry.Name(), func(obj *unstructured.Unstructured) {
-			injectAnnotation(obj, CreatedByAnnotation, managedByValue)
-		}); err != nil {
+		if err := internalapply.Manifest(ctx, dynClient, mapper, data, entry.Name(), mutator); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// removeCertManagerAnnotation deletes the cert-manager CA-injection annotation
+// from obj so that cert-manager does not overwrite the caBundle that the
+// API-server cert signing path manages.
+func removeCertManagerAnnotation(obj *unstructured.Unstructured) {
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		return
+	}
+	delete(annotations, "cert-manager.io/inject-ca-from")
+	obj.SetAnnotations(annotations)
 }
 
 // ensureNamespace creates the named namespace, stamped with the managed-by
@@ -193,6 +241,12 @@ func ensureNamespace(ctx context.Context, dynClient dynamic.Interface, name stri
 	}
 	fmt.Printf("Created Namespace %q\n", name)
 	return nil
+}
+
+// stampManagedBy adds the created-by annotation to obj so that resources
+// applied by "watchctl install" can be identified later.
+func stampManagedBy(obj *unstructured.Unstructured) {
+	injectAnnotation(obj, CreatedByAnnotation, managedByValue)
 }
 
 // injectAnnotation adds or overwrites a single annotation on obj.
