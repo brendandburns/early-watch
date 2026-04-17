@@ -93,6 +93,9 @@ func generateSelfSignedCert(dnsNames []string) (caCertPEM, certPEM, keyPEM []byt
 			CommonName:   "earlywatch-webhook-ca",
 			Organization: []string{"earlywatch.io"},
 		},
+		// NotBefore is set one minute in the past to tolerate minor clock
+		// skew between the machine running the installer and the cluster
+		// nodes that validate the certificate chain.
 		NotBefore:             now.Add(-time.Minute),
 		NotAfter:              now.Add(certValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
@@ -128,7 +131,10 @@ func generateSelfSignedCert(dnsNames []string) (caCertPEM, certPEM, keyPEM []byt
 			CommonName:   dnsNames[0],
 			Organization: []string{"earlywatch.io"},
 		},
-		DNSNames:  dnsNames,
+		DNSNames: dnsNames,
+		// NotBefore is set one minute in the past to tolerate minor clock
+		// skew between the machine running the installer and the cluster
+		// nodes that validate the certificate chain.
 		NotBefore: now.Add(-time.Minute),
 		NotAfter:  now.Add(certValidity),
 		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
