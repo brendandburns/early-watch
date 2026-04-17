@@ -125,7 +125,7 @@ func Run(opts Options) error {
 	var manifestMutator func(*unstructured.Unstructured)
 	if opts.APIServerCertSigning {
 		manifestMutator = func(obj *unstructured.Unstructured) {
-			injectAnnotation(obj, CreatedByAnnotation, managedByValue)
+			stampManagedBy(obj)
 			if obj.GetKind() == "ValidatingWebhookConfiguration" {
 				removeCertManagerAnnotation(obj)
 			}
@@ -169,9 +169,7 @@ func Run(opts Options) error {
 // annotation is used.
 func applyManifestDir(ctx context.Context, dynClient dynamic.Interface, mapper *restmapper.DeferredDiscoveryRESTMapper, dir string, replacements map[string]string, mutator func(*unstructured.Unstructured)) error {
 	if mutator == nil {
-		mutator = func(obj *unstructured.Unstructured) {
-			injectAnnotation(obj, CreatedByAnnotation, managedByValue)
-		}
+		mutator = stampManagedBy
 	}
 
 	entries, err := fs.ReadDir(manifestsFS, dir)
@@ -241,6 +239,12 @@ func ensureNamespace(ctx context.Context, dynClient dynamic.Interface, name stri
 	}
 	fmt.Printf("Created Namespace %q\n", name)
 	return nil
+}
+
+// stampManagedBy adds the created-by annotation to obj so that resources
+// applied by "watchctl install" can be identified later.
+func stampManagedBy(obj *unstructured.Unstructured) {
+	injectAnnotation(obj, CreatedByAnnotation, managedByValue)
 }
 
 // injectAnnotation adds or overwrites a single annotation on obj.

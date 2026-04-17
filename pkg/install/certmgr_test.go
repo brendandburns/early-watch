@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/pem"
 	"testing"
+	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	certificatesv1 "k8s.io/api/certificates/v1"
@@ -82,7 +83,7 @@ func TestWaitForCertificate_Timeout(t *testing.T) {
 	}
 	clientset := fake.NewSimpleClientset(csr)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	_, err := waitForCertificate(ctx, clientset)
@@ -90,9 +91,6 @@ func TestWaitForCertificate_Timeout(t *testing.T) {
 		t.Fatal("expected an error on timeout, got nil")
 	}
 }
-
-// millisecond is a convenience alias used in test timeouts.
-const millisecond = 1000000 // nanoseconds in a millisecond (time.Millisecond)
 
 // TestClusterCABundle_FromRESTConfig verifies that the CA is read from the
 // REST config's TLSClientConfig when present.
