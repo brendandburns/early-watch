@@ -66,11 +66,13 @@ type Options struct {
 	// Deployment. Only used when ManualTouchInstall is true.
 	// Defaults to defaultAuditMonitorImage when empty.
 	AuditMonitorImage string
-	// APIServerCertSigning, when true (the default), provisions the webhook
-	// TLS certificate using the Kubernetes built-in CertificateSigningRequest
-	// API and stores the result in a Secret.  When false the install step
-	// relies on cert-manager (or another external CA) to populate the Secret
-	// and inject the caBundle into the ValidatingWebhookConfiguration.
+	// APIServerCertSigning, when true, provisions the webhook TLS
+	// certificate using the Kubernetes built-in
+	// CertificateSigningRequest API and stores the result in a Secret.
+	// When false, the install step relies on cert-manager (or another
+	// external CA) to populate the Secret and inject the caBundle into the
+	// ValidatingWebhookConfiguration. The CLI may default this to true, but
+	// library callers using Options{} must set it explicitly.
 	APIServerCertSigning bool
 }
 

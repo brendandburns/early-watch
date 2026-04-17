@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"os"
 	"time"
 
 	certificatesv1 "k8s.io/api/certificates/v1"
@@ -20,9 +21,13 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// csrName is the name given to the CertificateSigningRequest resource
-// created during installation.
-const csrName = "early-watch-webhook-serving"
+// csrNameForNamespace returns the name for the CertificateSigningRequest
+// resource created during installation of EarlyWatch into the given namespace.
+// Including the namespace avoids collisions when multiple installs run
+// concurrently or when retrying after a partial install.
+func csrNameForNamespace(namespace string) string {
+	return "early-watch-webhook-serving-" + namespace
+}
 
 // webhookSecretName is the name of the Secret that holds the webhook TLS
 // certificate and private key.
@@ -80,14 +85,15 @@ func provisionWebhookCertWithClient(ctx context.Context, clientset kubernetes.In
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
 	// Remove any stale CSR from a previous install attempt.
-	if err := deleteCSRIfExists(ctx, clientset); err != nil {
+	if err := deleteCSRIfExists(ctx, clientset, namespace); err != nil {
 		return err
 	}
 
 	// Submit the CSR to the Kubernetes API.
+	name := csrNameForNamespace(namespace)
 	kCSR := &certificatesv1.CertificateSigningRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: csrName,
+			Name: name,
 			Annotations: map[string]string{
 				CreatedByAnnotation: managedByValue,
 			},
@@ -108,9 +114,9 @@ func provisionWebhookCertWithClient(ctx context.Context, clientset kubernetes.In
 
 	created, err := clientset.CertificatesV1().CertificateSigningRequests().Create(ctx, kCSR, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("creating CertificateSigningRequest %q: %w", csrName, err)
+		return fmt.Errorf("creating CertificateSigningRequest %q: %w", name, err)
 	}
-	fmt.Printf("Created CertificateSigningRequest %q\n", csrName)
+	fmt.Printf("Created CertificateSigningRequest %q\n", name)
 
 	// Approve the CSR so that the controller-manager will sign it.
 	created.Status.Conditions = append(created.Status.Conditions, certificatesv1.CertificateSigningRequestCondition{
@@ -121,27 +127,27 @@ func provisionWebhookCertWithClient(ctx context.Context, clientset kubernetes.In
 		LastUpdateTime: metav1.Now(),
 	})
 
-	if _, err := clientset.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, csrName, created, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("approving CertificateSigningRequest %q: %w", csrName, err)
+	if _, err := clientset.CertificatesV1().CertificateSigningRequests().UpdateApproval(ctx, name, created, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("approving CertificateSigningRequest %q: %w", name, err)
 	}
-	fmt.Printf("Approved CertificateSigningRequest %q\n", csrName)
+	fmt.Printf("Approved CertificateSigningRequest %q\n", name)
 
 	// Wait for the controller-manager to populate the signed certificate.
-	signedCertPEM, err := waitForCertificate(ctx, clientset)
+	signedCertPEM, err := waitForCertificate(ctx, clientset, namespace)
 	if err != nil {
 		return err
 	}
 
 	// Marshal the private key to PKCS8 DER, then PEM-encode it.
-	keyDER, err := x509.MarshalECPrivateKey(privateKey)
+	keyDER, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		return fmt.Errorf("marshaling private key: %w", err)
 	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 
 	// Retrieve the cluster CA bundle so the ValidatingWebhookConfiguration
 	// can be patched to trust the signed certificate.
-	caBundle, err := clusterCABundle(ctx, clientset, cfg)
+	caBundle, err := clusterCABundle(ctx, clientset, cfg, namespace)
 	if err != nil {
 		return err
 	}
@@ -168,12 +174,13 @@ func webhookDNSNames(service, namespace string) []string {
 	}
 }
 
-// deleteCSRIfExists removes any pre-existing CertificateSigningRequest with
-// csrName so that a fresh installation can reuse the same name.
-func deleteCSRIfExists(ctx context.Context, clientset kubernetes.Interface) error {
-	err := clientset.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{})
+// deleteCSRIfExists removes any pre-existing CertificateSigningRequest for
+// the given namespace so that a fresh installation can reuse the same name.
+func deleteCSRIfExists(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	name := csrNameForNamespace(namespace)
+	err := clientset.CertificatesV1().CertificateSigningRequests().Delete(ctx, name, metav1.DeleteOptions{})
 	if err != nil && !kerrors.IsNotFound(err) {
-		return fmt.Errorf("deleting stale CertificateSigningRequest %q: %w", csrName, err)
+		return fmt.Errorf("deleting stale CertificateSigningRequest %q: %w", name, err)
 	}
 	return nil
 }
@@ -181,15 +188,16 @@ func deleteCSRIfExists(ctx context.Context, clientset kubernetes.Interface) erro
 // waitForCertificate polls the CertificateSigningRequest until its Certificate
 // field is populated by the controller-manager, then returns the PEM-encoded
 // signed certificate.
-func waitForCertificate(ctx context.Context, clientset kubernetes.Interface) ([]byte, error) {
+func waitForCertificate(ctx context.Context, clientset kubernetes.Interface, namespace string) ([]byte, error) {
+	name := csrNameForNamespace(namespace)
 	var certPEM []byte
 	pollCtx, cancel := context.WithTimeout(ctx, certSigningTimeout)
 	defer cancel()
 
 	err := wait.PollUntilContextTimeout(pollCtx, 2*time.Second, certSigningTimeout, true, func(ctx context.Context) (bool, error) {
-		csr, err := clientset.CertificatesV1().CertificateSigningRequests().Get(ctx, csrName, metav1.GetOptions{})
+		csr, err := clientset.CertificatesV1().CertificateSigningRequests().Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
-			return false, fmt.Errorf("getting CertificateSigningRequest %q: %w", csrName, err)
+			return false, fmt.Errorf("getting CertificateSigningRequest %q: %w", name, err)
 		}
 		if len(csr.Status.Certificate) == 0 {
 			return false, nil
@@ -198,20 +206,29 @@ func waitForCertificate(ctx context.Context, clientset kubernetes.Interface) ([]
 		return true, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("waiting for certificate from CertificateSigningRequest %q: %w", csrName, err)
+		return nil, fmt.Errorf("waiting for certificate from CertificateSigningRequest %q: %w", name, err)
 	}
 	return certPEM, nil
 }
 
 // clusterCABundle returns the PEM-encoded cluster CA certificate. It first
-// tries the REST config's TLS CA data, then falls back to the kube-root-ca.crt
-// ConfigMap that the Kubernetes control plane projects into every namespace.
-func clusterCABundle(ctx context.Context, clientset kubernetes.Interface, cfg *rest.Config) ([]byte, error) {
+// tries the REST config's inline CA data, then the CA file path, and finally
+// falls back to the kube-root-ca.crt ConfigMap that the Kubernetes control
+// plane projects into every namespace (reading from the install namespace to
+// minimize required RBAC).
+func clusterCABundle(ctx context.Context, clientset kubernetes.Interface, cfg *rest.Config, namespace string) ([]byte, error) {
 	if len(cfg.CAData) > 0 {
 		return cfg.CAData, nil
 	}
-	// Fall back to the well-known projected ConfigMap.
-	cm, err := clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
+	if cfg.CAFile != "" {
+		data, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA file %q: %w", cfg.CAFile, err)
+		}
+		return data, nil
+	}
+	// Fall back to the well-known projected ConfigMap in the install namespace.
+	cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("fetching cluster CA from kube-root-ca.crt: %w", err)
 	}

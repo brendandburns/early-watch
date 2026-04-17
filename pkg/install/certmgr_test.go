@@ -35,21 +35,22 @@ func TestWebhookDNSNames(t *testing.T) {
 // when no CSR with the given name exists.
 func TestDeleteCSRIfExists_NotFound(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
-	if err := deleteCSRIfExists(context.Background(), clientset); err != nil {
+	if err := deleteCSRIfExists(context.Background(), clientset, "test-ns"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 // TestDeleteCSRIfExists_Exists verifies that an existing CSR is deleted.
 func TestDeleteCSRIfExists_Exists(t *testing.T) {
+	name := csrNameForNamespace("test-ns")
 	csr := &certificatesv1.CertificateSigningRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: csrName},
+		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
 	clientset := fake.NewSimpleClientset(csr)
-	if err := deleteCSRIfExists(context.Background(), clientset); err != nil {
+	if err := deleteCSRIfExists(context.Background(), clientset, "test-ns"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	_, err := clientset.CertificatesV1().CertificateSigningRequests().Get(context.Background(), csrName, metav1.GetOptions{})
+	_, err := clientset.CertificatesV1().CertificateSigningRequests().Get(context.Background(), name, metav1.GetOptions{})
 	if err == nil {
 		t.Error("expected CSR to be deleted, but it still exists")
 	}
@@ -60,12 +61,12 @@ func TestDeleteCSRIfExists_Exists(t *testing.T) {
 func TestWaitForCertificate_ImmediatelyAvailable(t *testing.T) {
 	certPEM := []byte("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 	csr := &certificatesv1.CertificateSigningRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: csrName},
+		ObjectMeta: metav1.ObjectMeta{Name: csrNameForNamespace("test-ns")},
 		Status:     certificatesv1.CertificateSigningRequestStatus{Certificate: certPEM},
 	}
 	clientset := fake.NewSimpleClientset(csr)
 
-	got, err := waitForCertificate(context.Background(), clientset)
+	got, err := waitForCertificate(context.Background(), clientset, "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestWaitForCertificate_ImmediatelyAvailable(t *testing.T) {
 // error when the context is canceled before the certificate is available.
 func TestWaitForCertificate_Timeout(t *testing.T) {
 	csr := &certificatesv1.CertificateSigningRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: csrName},
+		ObjectMeta: metav1.ObjectMeta{Name: csrNameForNamespace("test-ns")},
 		// Status.Certificate deliberately left empty.
 	}
 	clientset := fake.NewSimpleClientset(csr)
@@ -86,7 +87,7 @@ func TestWaitForCertificate_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	_, err := waitForCertificate(ctx, clientset)
+	_, err := waitForCertificate(ctx, clientset, "test-ns")
 	if err == nil {
 		t.Fatal("expected an error on timeout, got nil")
 	}
@@ -101,7 +102,7 @@ func TestClusterCABundle_FromRESTConfig(t *testing.T) {
 	}
 	clientset := fake.NewSimpleClientset()
 
-	got, err := clusterCABundle(context.Background(), clientset, cfg)
+	got, err := clusterCABundle(context.Background(), clientset, cfg, "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,17 +112,18 @@ func TestClusterCABundle_FromRESTConfig(t *testing.T) {
 }
 
 // TestClusterCABundle_FromConfigMap verifies that the CA is fetched from the
-// kube-root-ca.crt ConfigMap when the REST config has no CA data.
+// kube-root-ca.crt ConfigMap in the install namespace when the REST config
+// has no CA data.
 func TestClusterCABundle_FromConfigMap(t *testing.T) {
 	caData := "-----BEGIN CERTIFICATE-----\nroot-ca\n-----END CERTIFICATE-----\n"
 	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "test-ns"},
 		Data:       map[string]string{"ca.crt": caData},
 	}
 	clientset := fake.NewSimpleClientset(cm)
 	cfg := &rest.Config{} // no CAData
 
-	got, err := clusterCABundle(context.Background(), clientset, cfg)
+	got, err := clusterCABundle(context.Background(), clientset, cfg, "test-ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestClusterCABundle_MissingConfigMap(t *testing.T) {
 	clientset := fake.NewSimpleClientset()
 	cfg := &rest.Config{}
 
-	_, err := clusterCABundle(context.Background(), clientset, cfg)
+	_, err := clusterCABundle(context.Background(), clientset, cfg, "test-ns")
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -258,7 +260,7 @@ func TestProvisionWebhookCert_HappyPath(t *testing.T) {
 		},
 	}
 	caCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-system"},
+		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: ns},
 		Data:       map[string]string{"ca.crt": "ca-pem-data"},
 	}
 
