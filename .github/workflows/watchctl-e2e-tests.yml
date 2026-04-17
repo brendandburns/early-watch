@@ -167,8 +167,8 @@ jobs:
       - name: Verify ChangeValidator CRD was removed
         run: |
           if kubectl get crd changevalidators.earlywatch.io 2>/dev/null; then
-            echo "ERROR: ChangeValidator CRD still exists after uninstall"
-            exit 1
+            kubectl wait --for=delete crd/changevalidators.earlywatch.io --timeout=60s \
+              || { echo "ERROR: ChangeValidator CRD still exists after uninstall"; exit 1; }
           fi
           echo "ChangeValidator CRD successfully removed"
 
@@ -176,8 +176,8 @@ jobs:
         if: ${{ matrix.manual_touch }}
         run: |
           if kubectl get crd manualtouchevents.earlywatch.io 2>/dev/null; then
-            echo "ERROR: ManualTouchEvent CRD still exists after uninstall --manual-touch"
-            exit 1
+            kubectl wait --for=delete crd/manualtouchevents.earlywatch.io --timeout=60s \
+              || { echo "ERROR: ManualTouchEvent CRD still exists after uninstall --manual-touch"; exit 1; }
           fi
           echo "ManualTouchEvent CRD successfully removed"
 
