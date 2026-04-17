@@ -2,18 +2,14 @@ package install
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/pem"
 	"testing"
-	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
-	certificatesv1 "k8s.io/api/certificates/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/rest"
-	k8stesting "k8s.io/client-go/testing"
 )
 
 // TestWebhookDNSNames verifies that the expected SAN entries are returned for
@@ -31,116 +27,51 @@ func TestWebhookDNSNames(t *testing.T) {
 	}
 }
 
-// TestDeleteCSRIfExists_NotFound verifies that deleteCSRIfExists is a no-op
-// when no CSR with the given name exists.
-func TestDeleteCSRIfExists_NotFound(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	if err := deleteCSRIfExists(context.Background(), clientset, "test-ns"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// TestDeleteCSRIfExists_Exists verifies that an existing CSR is deleted.
-func TestDeleteCSRIfExists_Exists(t *testing.T) {
-	name := csrNameForNamespace("test-ns")
-	csr := &certificatesv1.CertificateSigningRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-	}
-	clientset := fake.NewSimpleClientset(csr)
-	if err := deleteCSRIfExists(context.Background(), clientset, "test-ns"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	_, err := clientset.CertificatesV1().CertificateSigningRequests().Get(context.Background(), name, metav1.GetOptions{})
-	if err == nil {
-		t.Error("expected CSR to be deleted, but it still exists")
-	}
-}
-
-// TestWaitForCertificate_ImmediatelyAvailable verifies that waitForCertificate
-// returns the certificate when it is already populated.
-func TestWaitForCertificate_ImmediatelyAvailable(t *testing.T) {
-	certPEM := []byte("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
-	csr := &certificatesv1.CertificateSigningRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: csrNameForNamespace("test-ns")},
-		Status:     certificatesv1.CertificateSigningRequestStatus{Certificate: certPEM},
-	}
-	clientset := fake.NewSimpleClientset(csr)
-
-	got, err := waitForCertificate(context.Background(), clientset, "test-ns")
+// TestGenerateSelfSignedCert verifies that generateSelfSignedCert returns
+// valid PEM-encoded CA cert, serving cert, and private key for the given DNS
+// names.
+func TestGenerateSelfSignedCert(t *testing.T) {
+	dnsNames := webhookDNSNames("my-svc", "my-ns")
+	caCertPEM, certPEM, keyPEM, err := generateSelfSignedCert(dnsNames)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(got) != string(certPEM) {
-		t.Errorf("got cert %q, want %q", got, certPEM)
+	if len(caCertPEM) == 0 {
+		t.Error("expected non-empty CA cert PEM")
 	}
-}
-
-// TestWaitForCertificate_Timeout verifies that waitForCertificate returns an
-// error when the context is canceled before the certificate is available.
-func TestWaitForCertificate_Timeout(t *testing.T) {
-	csr := &certificatesv1.CertificateSigningRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: csrNameForNamespace("test-ns")},
-		// Status.Certificate deliberately left empty.
+	if len(certPEM) == 0 {
+		t.Error("expected non-empty cert PEM")
 	}
-	clientset := fake.NewSimpleClientset(csr)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	_, err := waitForCertificate(ctx, clientset, "test-ns")
-	if err == nil {
-		t.Fatal("expected an error on timeout, got nil")
+	if len(keyPEM) == 0 {
+		t.Error("expected non-empty key PEM")
 	}
-}
 
-// TestClusterCABundle_FromRESTConfig verifies that the CA is read from the
-// REST config's TLSClientConfig when present.
-func TestClusterCABundle_FromRESTConfig(t *testing.T) {
-	caData := []byte("-----BEGIN CERTIFICATE-----\ncluster-ca\n-----END CERTIFICATE-----\n")
-	cfg := &rest.Config{
-		TLSClientConfig: rest.TLSClientConfig{CAData: caData},
+	// Verify that the serving cert is signed by the CA.
+	caBlock, _ := pem.Decode(caCertPEM)
+	if caBlock == nil {
+		t.Fatal("failed to decode CA cert PEM")
 	}
-	clientset := fake.NewSimpleClientset()
-
-	got, err := clusterCABundle(context.Background(), clientset, cfg, "test-ns")
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("failed to parse CA cert: %v", err)
 	}
-	if string(got) != string(caData) {
-		t.Errorf("got CA %q, want %q", got, caData)
-	}
-}
 
-// TestClusterCABundle_FromConfigMap verifies that the CA is fetched from the
-// kube-root-ca.crt ConfigMap in the install namespace when the REST config
-// has no CA data.
-func TestClusterCABundle_FromConfigMap(t *testing.T) {
-	caData := "-----BEGIN CERTIFICATE-----\nroot-ca\n-----END CERTIFICATE-----\n"
-	cm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "test-ns"},
-		Data:       map[string]string{"ca.crt": caData},
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		t.Fatal("failed to decode serving cert PEM")
 	}
-	clientset := fake.NewSimpleClientset(cm)
-	cfg := &rest.Config{} // no CAData
-
-	got, err := clusterCABundle(context.Background(), clientset, cfg, "test-ns")
+	servingCert, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("failed to parse serving cert: %v", err)
 	}
-	if string(got) != caData {
-		t.Errorf("got CA %q, want %q", got, caData)
-	}
-}
 
-// TestClusterCABundle_MissingConfigMap verifies that an error is returned when
-// neither the REST config nor the ConfigMap provides a CA.
-func TestClusterCABundle_MissingConfigMap(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	cfg := &rest.Config{}
-
-	_, err := clusterCABundle(context.Background(), clientset, cfg, "test-ns")
-	if err == nil {
-		t.Fatal("expected an error, got nil")
+	pool := x509.NewCertPool()
+	pool.AddCert(caCert)
+	if _, err := servingCert.Verify(x509.VerifyOptions{
+		DNSName: dnsNames[0],
+		Roots:   pool,
+	}); err != nil {
+		t.Errorf("serving cert does not verify against CA: %v", err)
 	}
 }
 
@@ -239,14 +170,10 @@ func TestPatchWebhookCABundle_NotFound(t *testing.T) {
 }
 
 // TestProvisionWebhookCert_HappyPath verifies the end-to-end happy-path of
-// provisionWebhookCert using a fake Kubernetes client.  The test simulates the
-// controller-manager signing the CSR by populating Status.Certificate after
-// the approval update is recorded.
+// provisionWebhookCertWithClient using a fake Kubernetes client.
 func TestProvisionWebhookCert_HappyPath(t *testing.T) {
 	const ns = "test-ns"
 
-	// Seed the fake cluster with the ValidatingWebhookConfiguration and the
-	// kube-root-ca.crt ConfigMap that provisionWebhookCert depends on.
 	sideEffectsNone := admissionv1.SideEffectClassNone
 	webhookCfg := &admissionv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{Name: webhookConfigName},
@@ -259,29 +186,11 @@ func TestProvisionWebhookCert_HappyPath(t *testing.T) {
 			},
 		},
 	}
-	caCM := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: ns},
-		Data:       map[string]string{"ca.crt": "ca-pem-data"},
-	}
 
-	clientset := fake.NewSimpleClientset(webhookCfg, caCM)
+	clientset := fake.NewSimpleClientset(webhookCfg)
 
-	// Intercept UpdateApproval calls: when a CSR approval is recorded, inject
-	// a signed certificate into the CSR status so that waitForCertificate
-	// returns immediately.
-	fakeCert := fakeCertPEM(t)
-	clientset.PrependReactor("update", "certificatesigningrequests", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		ua := action.(k8stesting.UpdateAction)
-		obj := ua.GetObject().(*certificatesv1.CertificateSigningRequest)
-		// Simulate the controller-manager signing the cert.
-		obj.Status.Certificate = fakeCert
-		return false, obj, nil
-	})
-
-	cfg := &rest.Config{} // no CAData — will fall back to ConfigMap
-
-	if err := provisionWebhookCertWithClient(context.Background(), clientset, cfg, ns); err != nil {
-		t.Fatalf("provisionWebhookCert returned error: %v", err)
+	if err := provisionWebhookCertWithClient(context.Background(), clientset, ns); err != nil {
+		t.Fatalf("provisionWebhookCertWithClient returned error: %v", err)
 	}
 
 	// Verify the Secret was created with TLS data.
@@ -304,11 +213,4 @@ func TestProvisionWebhookCert_HappyPath(t *testing.T) {
 	if len(vwc.Webhooks) == 0 || len(vwc.Webhooks[0].ClientConfig.CABundle) == 0 {
 		t.Error("expected caBundle to be set in ValidatingWebhookConfiguration")
 	}
-}
-
-// fakeCertPEM returns a minimal PEM-encoded certificate for use in tests.
-func fakeCertPEM(t *testing.T) []byte {
-	t.Helper()
-	block := &pem.Block{Type: "CERTIFICATE", Bytes: []byte("fake-cert-der")}
-	return pem.EncodeToMemory(block)
 }

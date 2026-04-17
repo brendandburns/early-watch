@@ -20,10 +20,10 @@ var installCmd = &cobra.Command{
 ValidatingWebhookConfiguration to the cluster specified by --kubeconfig (or
 the in-cluster config when running inside a pod).
 
-By default, install provisions the webhook TLS certificate using the
-Kubernetes built-in CertificateSigningRequest API (certificates.k8s.io/v1).
-The signed certificate is stored in a Secret and the cluster CA bundle is
-injected into the ValidatingWebhookConfiguration automatically.  Use
+By default, install provisions the webhook TLS certificate using a self-signed
+CA generated locally.  The signed certificate is stored in a Secret and the
+CA certificate is injected into the ValidatingWebhookConfiguration
+automatically, so no cert-manager installation is required.  Use
 --no-api-server-cert-signing to skip this step and rely on cert-manager (or
 another external CA) to manage the webhook certificate instead.
 
@@ -54,7 +54,7 @@ func init() {
 	f.StringVar(&installFlags.namespace, "namespace", "", "Kubernetes namespace to install EarlyWatch into. Defaults to early-watch-system.")
 	f.BoolVar(&installFlags.manualTouch, "manual-touch", false, "Also install the audit-monitor components for manual touch monitoring.")
 	f.StringVar(&installFlags.auditMonitorImage, "audit-monitor-image", "", "Container image for the audit-monitor Deployment. Defaults to early-watch-audit-monitor:latest. Only used with --manual-touch.")
-	f.BoolVar(&installFlags.noAPIServerCertSigning, "no-api-server-cert-signing", false, "Disable automatic TLS certificate provisioning via the Kubernetes CertificateSigningRequest API. Use this when cert-manager or another external CA manages the webhook certificate.")
+	f.BoolVar(&installFlags.noAPIServerCertSigning, "no-api-server-cert-signing", false, "Disable automatic TLS certificate provisioning via self-signed CA. Use this when cert-manager or another external CA manages the webhook certificate.")
 }
 
 func runInstall(_ *cobra.Command, _ []string) error {

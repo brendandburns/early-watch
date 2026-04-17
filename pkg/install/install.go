@@ -149,11 +149,11 @@ func Run(opts Options) error {
 		}
 	}
 
-	// Provision the webhook TLS certificate via the Kubernetes
-	// CertificateSigningRequest API and inject the cluster CA bundle into
-	// the ValidatingWebhookConfiguration.
+	// Provision the webhook TLS certificate using a self-signed CA and inject
+	// the CA certificate into the ValidatingWebhookConfiguration caBundle so
+	// the API server can verify the webhook server's certificate.
 	if opts.APIServerCertSigning {
-		fmt.Println("Provisioning webhook TLS certificate via API server certificate signing...")
+		fmt.Println("Provisioning webhook TLS certificate via self-signed CA...")
 		if err := provisionWebhookCert(ctx, cfg, opts.Namespace); err != nil {
 			return fmt.Errorf("provisioning webhook TLS certificate: %w", err)
 		}
