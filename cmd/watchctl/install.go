@@ -50,11 +50,23 @@ var installFlags struct {
 func init() {
 	f := installCmd.Flags()
 	f.StringVar(&installFlags.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file. Defaults to in-cluster config when empty.")
-	f.StringVar(&installFlags.image, "image", "", "Container image for the webhook Deployment. Defaults to early-watch:latest.")
+	f.StringVar(&installFlags.image, "image", defaultWebhookImageForVersion(), "Container image for the webhook Deployment.")
 	f.StringVar(&installFlags.namespace, "namespace", "", "Kubernetes namespace to install EarlyWatch into. Defaults to early-watch-system.")
 	f.BoolVar(&installFlags.manualTouch, "manual-touch", false, "Also install the audit-monitor components for manual touch monitoring.")
-	f.StringVar(&installFlags.auditMonitorImage, "audit-monitor-image", "", "Container image for the audit-monitor Deployment. Defaults to early-watch-audit-monitor:latest. Only used with --manual-touch.")
+	f.StringVar(&installFlags.auditMonitorImage, "audit-monitor-image", defaultAuditMonitorImageForVersion(), "Container image for the audit-monitor Deployment. Only used with --manual-touch.")
 	f.BoolVar(&installFlags.noAPIServerCertSigning, "no-api-server-cert-signing", false, "Disable automatic TLS certificate provisioning via self-signed CA. Use this when cert-manager or another external CA manages the webhook certificate.")
+}
+
+// defaultWebhookImageForVersion returns the default container image for the
+// webhook Deployment, tagged with the current build version.
+func defaultWebhookImageForVersion() string {
+	return "ghcr.io/brendandburns/early-watch/webhook:" + Version
+}
+
+// defaultAuditMonitorImageForVersion returns the default container image for
+// the audit-monitor Deployment, tagged with the current build version.
+func defaultAuditMonitorImageForVersion() string {
+	return "ghcr.io/brendandburns/early-watch/audit-monitor:" + Version
 }
 
 func runInstall(_ *cobra.Command, _ []string) error {
