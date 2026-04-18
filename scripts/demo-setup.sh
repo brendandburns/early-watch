@@ -114,8 +114,7 @@ print_info ""
 print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
 pause
 
-cd "$REPO_ROOT"
-run_cmd go build -o watchctl ./cmd/watchctl/...
+run_cmd "$REPO_ROOT/scripts/build.sh" "$REPO_ROOT/watchctl"
 
 print_success "watchctl built successfully at $WATCHCTL"
 pause
