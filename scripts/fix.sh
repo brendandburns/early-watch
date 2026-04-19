@@ -8,7 +8,9 @@
 #                            (e.g. misspell, whitespace, unconvert)
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/demo-util.sh
+source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
+
 cd "${REPO_ROOT}"
 
 echo "==> gofmt -s (format + simplify)..."

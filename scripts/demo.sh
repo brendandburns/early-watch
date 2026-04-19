@@ -23,7 +23,7 @@
 #                               already installed on the cluster (e.g. after a previous run).
 #   --image-pull-secret=<path>  Path to a Docker config JSON file (e.g. ~/.docker/config.json)
 #                               used to pull images from a private registry. The script creates
-#                               a Kubernetes Secret named "pullSecret" in the early-watch-system
+#                               a Kubernetes Secret named "pullsecret" in the early-watch-system
 #                               namespace from this file (optional).
 set -euo pipefail
 
@@ -43,7 +43,10 @@ done
 # shellcheck source=scripts/demo-util.sh
 source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
-# ── Cleanup on exit ──────────────────────────────────────────────────────────
+# ── Cleanup hook ─────────────────────────────────────────────────────────────
+# cleanup() runs demo-teardown.sh unless --skip-cleanup was set.
+# _pre_exit_cleanup() is called by _on_exit (defined in demo-util.sh) before
+# the keep-open prompt fires on exit.
 cleanup() {
   if [ "$SKIP_CLEANUP" = "true" ]; then
     echo ""
@@ -53,7 +56,7 @@ cleanup() {
   fi
   bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
 }
-trap cleanup EXIT
+_pre_exit_cleanup() { cleanup; }
 
 # ── Verify cluster and watchctl are available ────────────────────────────────
 if ! kubectl cluster-info &>/dev/null; then
@@ -102,14 +105,14 @@ else
     fi
     print_info "Ensuring namespace 'early-watch-system' exists..."
     run_cmd "kubectl create namespace early-watch-system --dry-run=client -o yaml | kubectl apply -f -"
-    print_info "Creating image pull secret 'pullSecret' in early-watch-system..."
-    run_cmd "kubectl create secret generic pullSecret \
+    print_info "Creating image pull secret 'pullsecret' in early-watch-system..."
+    run_cmd "kubectl create secret generic pullsecret \
     --from-file=.dockerconfigjson=\"$IMAGE_PULL_SECRET\" \
     --type=kubernetes.io/dockerconfigjson \
     --namespace=early-watch-system \
     --dry-run=client -o yaml \
     | kubectl apply -f -"
-    INSTALL_ARGS+=("--image-pull-secret" "pullSecret")
+    INSTALL_ARGS+=("--image-pull-secret" "pullsecret")
   fi
   run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
 

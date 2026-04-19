@@ -39,21 +39,6 @@ done
 # shellcheck source=scripts/demo-util.sh
 source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
-# ── Exit trap — keep terminal open on failure ────────────────────────────────
-# When set -e causes an early exit the terminal window would otherwise close
-# immediately, losing all diagnostic output.  This trap intercepts non-zero
-# exits and waits for the user to press Enter before the shell finishes.
-_on_exit() {
-  local rc=$?
-  if [ "$rc" -ne 0 ]; then
-    echo ""
-    print_error "Setup failed (exit code ${rc}). Review the output above."
-    echo -n "${DIM}   Press Enter to close...${RESET}"
-    read -r dummy
-  fi
-}
-trap '_on_exit' EXIT
-
 # ── Header ───────────────────────────────────────────────────────────────────
 clear
 echo "${BOLD}EarlyWatch Demo — Setup${RESET}"

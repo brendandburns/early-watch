@@ -184,6 +184,11 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(ManualTouchCheck)
 		**out = **in
 	}
+	if in.CheckLock != nil {
+		in, out := &in.CheckLock, &out.CheckLock
+		*out = new(CheckLockRule)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.DataKeySafetyCheck != nil {
 		in, out := &in.DataKeySafetyCheck, &out.DataKeySafetyCheck
 		*out = new(DataKeySafetyCheck)
@@ -335,6 +340,27 @@ func (in *ManualTouchCheck) DeepCopy() *ManualTouchCheck {
 		return nil
 	}
 	out := new(ManualTouchCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *CheckLockRule) DeepCopyInto(out *CheckLockRule) {
+	*out = *in
+	if in.LockOnMutate != nil {
+		in, out := &in.LockOnMutate, &out.LockOnMutate
+		*out = new(bool)
+		**out = **in
+	}
+}
+
+// DeepCopy returns a deep copy of a CheckLockRule.
+func (in *CheckLockRule) DeepCopy() *CheckLockRule {
+	if in == nil {
+		return nil
+	}
+	out := new(CheckLockRule)
 	in.DeepCopyInto(out)
 	return out
 }

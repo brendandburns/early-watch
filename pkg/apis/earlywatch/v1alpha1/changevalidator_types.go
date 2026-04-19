@@ -113,6 +113,11 @@ type GuardRule struct {
 	// +optional
 	ManualTouchCheck *ManualTouchCheck `json:"manualTouchCheck,omitempty"`
 
+	// CheckLock optionally configures the CheckLock rule.  When omitted the
+	// rule applies only to DELETE operations (the default behavior).
+	// +optional
+	CheckLock *CheckLockRule `json:"checkLock,omitempty"`
+
 	// DataKeySafetyCheck prevents UPDATE requests that remove a data key
 	// from a ConfigMap or Secret when that specific key is still referenced
 	// by another resource.
@@ -142,9 +147,19 @@ type AnnotationCheck struct {
 }
 
 // LockAnnotation is the annotation key that, when present on a resource,
-// prevents it from being deleted.  Any non-empty annotation value is treated
-// as a lock.
+// prevents it from being deleted (and optionally mutated).  Any non-empty
+// annotation value is treated as a lock.
 const LockAnnotation = "earlywatch.io/lock"
+
+// CheckLockRule configures a CheckLock rule.  When omitted entirely the rule
+// behaves with default settings (delete-only).
+type CheckLockRule struct {
+	// LockOnMutate, when true, extends the lock check to UPDATE operations in
+	// addition to DELETE operations.  When false or omitted the check only
+	// applies to DELETE requests, preserving the default behavior.
+	// +optional
+	LockOnMutate *bool `json:"lockOnMutate,omitempty"`
+}
 
 // RuleType identifies the kind of safety check a GuardRule performs.
 type RuleType string
@@ -173,8 +188,9 @@ const (
 	// only be deleted after the operator adds a designated annotation.
 	RuleTypeAnnotationCheck RuleType = "AnnotationCheck"
 
-	// RuleTypeCheckLock denies a DELETE request when the subject resource
-	// carries the earlywatch.io/lock annotation.
+	// RuleTypeCheckLock denies a DELETE request (and optionally UPDATE requests)
+	// when the subject resource carries the earlywatch.io/lock annotation.
+	// Configure the optional checkLock field to extend the check to mutations.
 	RuleTypeCheckLock RuleType = "CheckLock"
 
 	// RuleTypeManualTouchCheck denies the request when a recent manual
