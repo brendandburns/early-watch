@@ -2,7 +2,9 @@
 # install-hooks.sh — install git hooks and golangci-lint for local development.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/demo-util.sh
+source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
+
 GOLANGCI_LINT_VERSION="v2.11.4"
 
 echo "==> Configuring git to use .githooks directory..."
