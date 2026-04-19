@@ -1906,3 +1906,341 @@ func TestEvaluateManualTouchCheck_InvalidWindowDuration(t *testing.T) {
 		t.Error("expected error for invalid window duration")
 	}
 }
+
+// --- ServicePodSelectorCheck tests ---
+
+// serviceObj builds a minimal Service JSON object for use in admission requests.
+// selector may be nil (no selector). clusterIP may be empty (uses default) or
+// "None" (headless).
+func serviceObj(selector map[string]string, clusterIP string) map[string]interface{} {
+	spec := map[string]interface{}{}
+	if selector != nil {
+		sel := make(map[string]interface{}, len(selector))
+		for k, v := range selector {
+			sel[k] = v
+		}
+		spec["selector"] = sel
+	}
+	if clusterIP != "" {
+		spec["clusterIP"] = clusterIP
+	}
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+		"spec":       spec,
+	}
+}
+
+// makeUpdateRequest builds an admission.Request for an UPDATE operation.
+func makeUpdateRequest(group, resource, namespace, name string, oldObj, newObj interface{}) admission.Request {
+	var rawOld, rawNew []byte
+	if oldObj != nil {
+		var err error
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if newObj != nil {
+		var err error
+		rawNew, err = json.Marshal(newObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+			Object:    runtime.RawExtension{Raw: rawNew},
+		},
+	}
+}
+
+// newServicePodSelectorGuard builds a ChangeValidator that uses the
+// ServicePodSelectorCheck rule to protect Service UPDATE operations.
+func newServicePodSelectorGuard() *ewv1alpha1.ChangeValidator {
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-svc-selector", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:                    "service-must-keep-pods",
+					Type:                    ewv1alpha1.RuleTypeServicePodSelectorCheck,
+					Message:                 "service selector change would leave no matching pods",
+					ServicePodSelectorCheck: &ewv1alpha1.ServicePodSelectorCheck{},
+				},
+			},
+		},
+	}
+}
+
+// TestEvaluateRule_NilServicePodSelectorCheck verifies that a nil config
+// returns an error.
+func TestEvaluateRule_NilServicePodSelectorCheck(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	rule := ewv1alpha1.GuardRule{
+		Name:                    "bad-rule",
+		Type:                    ewv1alpha1.RuleTypeServicePodSelectorCheck,
+		Message:                 "msg",
+		ServicePodSelectorCheck: nil,
+	}
+	req := makeUpdateRequest("", "services", "default", "my-svc", serviceObj(nil, ""), serviceObj(nil, ""))
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil ServicePodSelectorCheck config")
+	}
+}
+
+// TestServicePodSelectorCheck_NonUpdateAllowed verifies that non-UPDATE
+// operations are always allowed.
+func TestServicePodSelectorCheck_NonUpdateAllowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// DELETE should be a no-op for this check.
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected non-UPDATE operation to be allowed")
+	}
+}
+
+// TestServicePodSelectorCheck_OldNoSelector_Allowed verifies that a service
+// with no selector (cannot select pods) is allowed to be modified.
+func TestServicePodSelectorCheck_OldNoSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(nil, "")
+	newSvc := serviceObj(map[string]string{"app": "other"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected service with no old selector to be allowed")
+	}
+}
+
+// TestServicePodSelectorCheck_HeadlessNoSelector_Allowed verifies that a
+// headless service (clusterIP=None) without a selector is exempt.
+func TestServicePodSelectorCheck_HeadlessNoSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(nil, "None")
+	newSvc := serviceObj(map[string]string{"app": "other"}, "10.0.0.1")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected headless service without selector to be exempt")
+	}
+}
+
+// TestServicePodSelectorCheck_OldNoPods_Allowed verifies that when the old
+// service had a selector but no matching pods, the change is allowed.
+func TestServicePodSelectorCheck_OldNoPods_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no pods
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected service with no old matching pods to be allowed")
+	}
+}
+
+// TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed verifies that
+// when the new service also selects pods, the change is allowed.
+func TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// Old and new service both select the same pod.
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected change to be allowed when new service still has matching pods")
+	}
+}
+
+// TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied verifies that
+// removing the selector is denied when the old service had matching pods.
+func TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(nil, "") // selector removed
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, msg, err := h.evaluateServicePodSelectorCheck(context.Background(), "selector change denied", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected change to be denied when new service has no selector but old had pods")
+	}
+	if msg != "selector change denied" {
+		t.Errorf("unexpected message: %q", msg)
+	}
+}
+
+// TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied verifies that
+// changing the selector so no pods match is denied when the old service had pods.
+func TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "") // different selector, no pods
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected change to be denied when new selector matches no pods but old had pods")
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_Denied is an integration test that verifies
+// the full Handle path denies a Service UPDATE that would drop all pod references.
+func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	guard := newServicePodSelectorGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected Handle to deny service UPDATE that drops all pod references")
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_Allowed verifies that a Service UPDATE
+// which keeps matching pods is allowed.
+func TestHandle_ServicePodSelectorCheck_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	guard := newServicePodSelectorGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected Handle to allow service UPDATE that retains pod references: %v", resp.Result)
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_NoPreviousPods_Allowed verifies that a
+// Service UPDATE is allowed when the old service had no matching pods.
+func TestHandle_ServicePodSelectorCheck_NoPreviousPods_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	guard := newServicePodSelectorGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no pods
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected Handle to allow service UPDATE when old service had no matching pods: %v", resp.Result)
+	}
+}

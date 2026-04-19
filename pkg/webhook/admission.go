@@ -175,6 +175,12 @@ func (h *AdmissionHandler) evaluateRule(
 	case ewv1alpha1.RuleTypeCheckLock:
 		return evaluateCheckLock(rule.Message, req)
 
+	case ewv1alpha1.RuleTypeServicePodSelectorCheck:
+		if rule.ServicePodSelectorCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type ServicePodSelectorCheck but no ServicePodSelectorCheck config", rule.Name)
+		}
+		return h.evaluateServicePodSelectorCheck(ctx, rule.Message, req)
+
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
 	}
@@ -693,4 +699,137 @@ func parseRSAPublicKey(pemData string) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("public key is not an RSA key")
 	}
 	return rsaPub, nil
+}
+
+// evaluateServicePodSelectorCheck denies an UPDATE to a Service when the
+// service previously selected at least one Pod but would select no Pods after
+// the change.  The check is a no-op for non-UPDATE requests and for headless
+// services (spec.clusterIP == "None") that carry no selector.
+func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
+	ctx context.Context,
+	message string,
+	req admission.Request,
+) (bool, string, error) {
+	// Only applicable to UPDATE operations.
+	if req.Operation != admissionv1.Update {
+		return false, "", nil
+	}
+
+	oldRaw := req.OldObject.Raw
+	if len(oldRaw) == 0 {
+		return false, "", nil
+	}
+
+	// Parse the old service to get its selector and clusterIP.
+	oldSelector, oldClusterIP, err := parseServiceSelectorAndClusterIP(oldRaw)
+	if err != nil {
+		return false, "", fmt.Errorf("parsing old service object: %w", err)
+	}
+
+	// Headless services without a selector are exempt from this check.
+	if oldClusterIP == "None" && len(oldSelector) == 0 {
+		return false, "", nil
+	}
+
+	// If the old service had no selector it could not have matched any Pods,
+	// so there is nothing to protect.
+	if len(oldSelector) == 0 {
+		return false, "", nil
+	}
+
+	// Check whether the old service actually had matching Pods.
+	oldHasPods, err := h.serviceHasMatchingPods(ctx, req.Namespace, oldSelector)
+	if err != nil {
+		return false, "", fmt.Errorf("checking pods for old service selector: %w", err)
+	}
+	if !oldHasPods {
+		// Previously no matching Pods – the change is safe.
+		return false, "", nil
+	}
+
+	// Old service had matching Pods.  Check if the new service also selects Pods.
+	newRaw := req.Object.Raw
+	if len(newRaw) == 0 {
+		return false, "", nil
+	}
+
+	newSelector, _, err := parseServiceSelectorAndClusterIP(newRaw)
+	if err != nil {
+		return false, "", fmt.Errorf("parsing new service object: %w", err)
+	}
+
+	// No selector on the new service means no Pods will be selected.
+	if len(newSelector) == 0 {
+		return true, renderMessage(message, req), nil
+	}
+
+	newHasPods, err := h.serviceHasMatchingPods(ctx, req.Namespace, newSelector)
+	if err != nil {
+		return false, "", fmt.Errorf("checking pods for new service selector: %w", err)
+	}
+	if !newHasPods {
+		return true, renderMessage(message, req), nil
+	}
+
+	return false, "", nil
+}
+
+// serviceHasMatchingPods reports whether any Pods in the given namespace match
+// the provided label selector map.
+func (h *AdmissionHandler) serviceHasMatchingPods(
+	ctx context.Context,
+	namespace string,
+	selectorMap map[string]string,
+) (bool, error) {
+	sel := labels.SelectorFromSet(labels.Set(selectorMap))
+	gvr := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "pods",
+	}
+	result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: sel.String(),
+	})
+	if err != nil {
+		return false, fmt.Errorf("listing Pods: %w", err)
+	}
+	return len(result.Items) > 0, nil
+}
+
+// parseServiceSelectorAndClusterIP extracts spec.selector (as a
+// map[string]string) and spec.clusterIP from a raw Service JSON object.
+// It returns nil selector and empty clusterIP when the fields are absent.
+func parseServiceSelectorAndClusterIP(raw []byte) (map[string]string, string, error) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, "", fmt.Errorf("unmarshalling service: %w", err)
+	}
+
+	spec, _ := obj["spec"].(map[string]interface{})
+	if spec == nil {
+		return nil, "", nil
+	}
+
+	clusterIP, _ := spec["clusterIP"].(string)
+
+	selectorRaw, ok := spec["selector"]
+	if !ok || selectorRaw == nil {
+		return nil, clusterIP, nil
+	}
+
+	selectorMap, ok := selectorRaw.(map[string]interface{})
+	if !ok {
+		return nil, clusterIP, fmt.Errorf("spec.selector is not a map")
+	}
+
+	result := make(map[string]string, len(selectorMap))
+	for k, v := range selectorMap {
+		str, ok := v.(string)
+		if !ok {
+			return nil, clusterIP, fmt.Errorf("selector value for key %q is not a string", k)
+		}
+		result[k] = str
+	}
+
+	return result, clusterIP, nil
 }

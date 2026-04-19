@@ -67,7 +67,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck;AnnotationCheck;CheckLock;ManualTouchCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck;AnnotationCheck;CheckLock;ManualTouchCheck;ServicePodSelectorCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -112,6 +112,13 @@ type GuardRule struct {
 	// Required when Type is ManualTouchCheck.
 	// +optional
 	ManualTouchCheck *ManualTouchCheck `json:"manualTouchCheck,omitempty"`
+
+	// ServicePodSelectorCheck denies an UPDATE to a Service when the service
+	// previously selected at least one Pod but would select no Pods after the
+	// change.  Headless services that have no selector are exempt.
+	// Required when Type is ServicePodSelectorCheck.
+	// +optional
+	ServicePodSelectorCheck *ServicePodSelectorCheck `json:"servicePodSelectorCheck,omitempty"`
 
 	// Message is the human-readable denial message returned to the user
 	// when this rule is violated.
@@ -174,6 +181,11 @@ const (
 	// touch (kubectl DELETE/CREATE/UPDATE) has been recorded for the same
 	// resource within a configurable look-back window.
 	RuleTypeManualTouchCheck RuleType = "ManualTouchCheck"
+
+	// RuleTypeServicePodSelectorCheck denies an UPDATE to a Service when the
+	// service previously selected at least one Pod but would select no Pods
+	// after the change.  Headless services with no selector are exempt.
+	RuleTypeServicePodSelectorCheck RuleType = "ServicePodSelectorCheck"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent
@@ -339,3 +351,9 @@ type ApprovalCheck struct {
 	// +optional
 	AnnotationKey string `json:"annotationKey,omitempty"`
 }
+
+// ServicePodSelectorCheck configures the service-to-pod selector safety check.
+// It prevents a Service UPDATE from dropping all Pod references when the service
+// previously had at least one matching Pod.  Headless services (spec.clusterIP
+// == "None") that carry no selector are exempt from this check.
+type ServicePodSelectorCheck struct{}

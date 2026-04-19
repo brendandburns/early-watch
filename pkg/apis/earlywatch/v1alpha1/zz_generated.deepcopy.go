@@ -184,6 +184,11 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(ManualTouchCheck)
 		**out = **in
 	}
+	if in.ServicePodSelectorCheck != nil {
+		in, out := &in.ServicePodSelectorCheck, &out.ServicePodSelectorCheck
+		*out = new(ServicePodSelectorCheck)
+		**out = **in
+	}
 }
 
 // DeepCopy returns a deep copy of a GuardRule.
@@ -330,6 +335,22 @@ func (in *ManualTouchCheck) DeepCopy() *ManualTouchCheck {
 		return nil
 	}
 	out := new(ManualTouchCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ServicePodSelectorCheck) DeepCopyInto(out *ServicePodSelectorCheck) {
+	*out = *in
+}
+
+// DeepCopy returns a deep copy of a ServicePodSelectorCheck.
+func (in *ServicePodSelectorCheck) DeepCopy() *ServicePodSelectorCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(ServicePodSelectorCheck)
 	in.DeepCopyInto(out)
 	return out
 }
