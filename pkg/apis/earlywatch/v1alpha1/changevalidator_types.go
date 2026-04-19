@@ -317,25 +317,40 @@ type ManualTouchCheck struct {
 }
 
 // ApprovalCheck configures a rule that requires the resource to carry a valid
-// approval annotation before a change (typically a DELETE) is permitted.
-// The annotation value must be the base64-encoded RSA-PSS SHA-256 signature
-// of the resource's canonical path, signed with the private key that
-// corresponds to PublicKey.
+// approval annotation before a change is permitted.
 //
-// The canonical path is computed as:
+// For DELETE operations the annotation value must be the base64-encoded
+// RSA-PSS SHA-256 signature of the resource's canonical path, signed with the
+// private key corresponding to PublicKey.  The canonical path is computed as:
 //
 //	<group>/<version>/namespaces/<namespace>/<resource>/<name>   (namespaced)
 //	<group>/<version>/<resource>/<name>                          (cluster-scoped)
 //
-// The annotation key defaults to "earlywatch.io/approved".
+// For UPDATE operations a separate annotation holds a base64-encoded
+// RSA-PSS SHA-256 signature covering the JSON merge patch (RFC 7396) between
+// the current and the proposed resource state.  Server-managed metadata fields
+// (resourceVersion, generation, uid, creationTimestamp, managedFields,
+// selfLink) and the change-approval annotation itself are excluded from the
+// patch before signing so that the signature covers only user-visible intent.
+// The pre-approval annotation must be placed on the existing resource before
+// the UPDATE is applied (e.g. via watchctl approve change).
 type ApprovalCheck struct {
 	// PublicKey is the PEM-encoded RSA public key (PKIX/SubjectPublicKeyInfo
-	// format) used to verify the approval signature.
+	// format) used to verify both delete- and change-approval signatures.
 	PublicKey string `json:"publicKey"`
 
 	// AnnotationKey is the annotation on the resource whose value holds the
-	// base64-encoded approval signature.
+	// base64-encoded delete-approval signature.
 	// Defaults to "earlywatch.io/approved".
 	// +optional
 	AnnotationKey string `json:"annotationKey,omitempty"`
+
+	// ChangeAnnotationKey is the annotation on the existing resource whose
+	// value holds the base64-encoded change-approval (UPDATE) signature.
+	// The annotation is read from the old object (the resource as it exists
+	// in the cluster before the update) and must have been placed there by
+	// watchctl approve change before the UPDATE is submitted.
+	// Defaults to "earlywatch.io/change-approved".
+	// +optional
+	ChangeAnnotationKey string `json:"changeAnnotationKey,omitempty"`
 }

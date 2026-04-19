@@ -224,3 +224,37 @@ func TestSignResourcePath_PKCS8Key(t *testing.T) {
 func writeFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0600)
 }
+
+// --- SignPatch tests ---
+
+func TestSignPatch_ProducesVerifiableSignature(t *testing.T) {
+	privKey, _ := generateTestKey(t)
+	patch := []byte(`{"data":{"key":"new"}}`)
+
+	sig, err := SignPatch(privKey, patch)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(sig) == 0 {
+		t.Fatal("expected non-empty signature")
+	}
+
+	digest := sha256.Sum256(patch)
+	if err := rsa.VerifyPSS(&privKey.PublicKey, crypto.SHA256, digest[:], sig, nil); err != nil {
+		t.Errorf("signature verification failed: %v", err)
+	}
+}
+
+func TestSignPatch_DifferentPatchesDifferentDigests(t *testing.T) {
+	privKey, _ := generateTestKey(t)
+
+	sig1, err := SignPatch(privKey, []byte(`{"data":{"a":"1"}}`))
+	if err != nil {
+		t.Fatalf("signing patch1: %v", err)
+	}
+
+	digest2 := sha256.Sum256([]byte(`{"data":{"a":"2"}}`))
+	if err := rsa.VerifyPSS(&privKey.PublicKey, crypto.SHA256, digest2[:], sig1, nil); err == nil {
+		t.Error("sig1 must not verify against a different patch")
+	}
+}

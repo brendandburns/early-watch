@@ -17,26 +17,41 @@ func init() {
 
 var approveCmd = &cobra.Command{
 	Use:   "approve",
-	Short: "Sign a Kubernetes resource and write an approval annotation",
-	Long: `approve signs a Kubernetes resource's canonical path with a local RSA
+	Short: "Sign and annotate a Kubernetes resource with an approval signature",
+	Long: `approve contains subcommands for pre-approving Kubernetes resource changes.
+
+  watchctl approve delete  – sign the resource path to pre-approve a deletion.
+  watchctl approve change  – sign the merge patch to pre-approve a modification.
+
+Run 'watchctl approve <subcommand> --help' for details on each subcommand.`,
+}
+
+// ---------------------------------------------------------------------------
+// approve delete
+// ---------------------------------------------------------------------------
+
+var approveDeleteCmd = &cobra.Command{
+	Use:   "delete",
+	Short: "Sign a Kubernetes resource path and write a delete-approval annotation",
+	Long: `approve delete signs a Kubernetes resource's canonical path with a local RSA
 private key and writes the resulting signature as an annotation on the resource.
 
 The annotation is later verified by the ApprovalCheck rule in the EarlyWatch
-admission webhook.
+admission webhook when a DELETE request arrives.
 
 Example:
 
-  watchctl approve \
+  watchctl approve delete \
     --private-key /path/to/private-key.pem \
     --group "" \
     --version v1 \
     --resource configmaps \
     --namespace default \
     --name my-config`,
-	RunE: runApprove,
+	RunE: runApproveDelete,
 }
 
-var approveFlags struct {
+var approveDeleteFlags struct {
 	privateKeyPath string
 	kubeconfig     string
 	group          string
@@ -48,35 +63,116 @@ var approveFlags struct {
 }
 
 func init() {
-	f := approveCmd.Flags()
-	f.StringVar(&approveFlags.privateKeyPath, "private-key", "", "Path to the PEM-encoded RSA private key file (required).")
-	f.StringVar(&approveFlags.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file. Defaults to in-cluster config when empty.")
-	f.StringVar(&approveFlags.group, "group", "", `API group of the resource (e.g. "" for core, "apps" for Deployments).`)
-	f.StringVar(&approveFlags.version, "version", "v1", `API version of the resource (e.g. "v1", "v1beta1").`)
-	f.StringVar(&approveFlags.resource, "resource", "", `Plural resource name (e.g. "configmaps", "deployments") (required).`)
-	f.StringVar(&approveFlags.namespace, "namespace", "", "Namespace of the resource. Leave empty for cluster-scoped resources.")
-	f.StringVar(&approveFlags.name, "name", "", "Name of the resource (required).")
-	f.StringVar(&approveFlags.annotationKey, "annotation-key", defaultAnnotationKey,
-		"Annotation key to write the signature to.")
+	approveCmd.AddCommand(approveDeleteCmd)
+	f := approveDeleteCmd.Flags()
+	f.StringVar(&approveDeleteFlags.privateKeyPath, "private-key", "", "Path to the PEM-encoded RSA private key file (required).")
+	f.StringVar(&approveDeleteFlags.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file. Defaults to in-cluster config when empty.")
+	f.StringVar(&approveDeleteFlags.group, "group", "", `API group of the resource (e.g. "" for core, "apps" for Deployments).`)
+	f.StringVar(&approveDeleteFlags.version, "version", "v1", `API version of the resource (e.g. "v1", "v1beta1").`)
+	f.StringVar(&approveDeleteFlags.resource, "resource", "", `Plural resource name (e.g. "configmaps", "deployments") (required).`)
+	f.StringVar(&approveDeleteFlags.namespace, "namespace", "", "Namespace of the resource. Leave empty for cluster-scoped resources.")
+	f.StringVar(&approveDeleteFlags.name, "name", "", "Name of the resource (required).")
+	f.StringVar(&approveDeleteFlags.annotationKey, "annotation-key", defaultAnnotationKey,
+		"Annotation key to write the delete-approval signature to.")
 
-	_ = approveCmd.MarkFlagRequired("private-key")
-	_ = approveCmd.MarkFlagRequired("resource")
-	_ = approveCmd.MarkFlagRequired("name")
+	_ = approveDeleteCmd.MarkFlagRequired("private-key")
+	_ = approveDeleteCmd.MarkFlagRequired("resource")
+	_ = approveDeleteCmd.MarkFlagRequired("name")
 }
 
-func runApprove(_ *cobra.Command, args []string) error {
+func runApproveDelete(_ *cobra.Command, _ []string) error {
 	opts := ewapprove.Options{
-		PrivateKeyPath: approveFlags.privateKeyPath,
-		Kubeconfig:     approveFlags.kubeconfig,
-		Group:          approveFlags.group,
-		Version:        approveFlags.version,
-		Resource:       approveFlags.resource,
-		Namespace:      approveFlags.namespace,
-		Name:           approveFlags.name,
-		AnnotationKey:  approveFlags.annotationKey,
+		PrivateKeyPath: approveDeleteFlags.privateKeyPath,
+		Kubeconfig:     approveDeleteFlags.kubeconfig,
+		Group:          approveDeleteFlags.group,
+		Version:        approveDeleteFlags.version,
+		Resource:       approveDeleteFlags.resource,
+		Namespace:      approveDeleteFlags.namespace,
+		Name:           approveDeleteFlags.name,
+		AnnotationKey:  approveDeleteFlags.annotationKey,
 	}
 
 	if err := ewapprove.Run(opts); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return err
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// approve change
+// ---------------------------------------------------------------------------
+
+var approveChangeCmd = &cobra.Command{
+	Use:   "change",
+	Short: "Sign the merge patch for a resource modification and write a change-approval annotation",
+	Long: `approve change computes the JSON merge patch between the current resource state
+and the desired new state (provided as a YAML or JSON file), signs the patch
+with a local RSA private key, and writes the resulting signature as a
+change-approval annotation on the existing resource in the cluster.
+
+The admission webhook will verify this annotation when the UPDATE is applied,
+ensuring the actual change matches the pre-approved patch.
+
+Example:
+
+  watchctl approve change \
+    --private-key /path/to/private-key.pem \
+    --group "" \
+    --version v1 \
+    --resource configmaps \
+    --namespace default \
+    --name my-config \
+    --file new-config.yaml`,
+	RunE: runApproveChange,
+}
+
+var approveChangeFlags struct {
+	privateKeyPath  string
+	kubeconfig      string
+	group           string
+	version         string
+	resource        string
+	namespace       string
+	name            string
+	annotationKey   string
+	newResourceFile string
+}
+
+func init() {
+	approveCmd.AddCommand(approveChangeCmd)
+	f := approveChangeCmd.Flags()
+	f.StringVar(&approveChangeFlags.privateKeyPath, "private-key", "", "Path to the PEM-encoded RSA private key file (required).")
+	f.StringVar(&approveChangeFlags.kubeconfig, "kubeconfig", "", "Path to the kubeconfig file. Defaults to in-cluster config when empty.")
+	f.StringVar(&approveChangeFlags.group, "group", "", `API group of the resource (e.g. "" for core, "apps" for Deployments).`)
+	f.StringVar(&approveChangeFlags.version, "version", "v1", `API version of the resource (e.g. "v1", "v1beta1").`)
+	f.StringVar(&approveChangeFlags.resource, "resource", "", `Plural resource name (e.g. "configmaps", "deployments") (required).`)
+	f.StringVar(&approveChangeFlags.namespace, "namespace", "", "Namespace of the resource. Leave empty for cluster-scoped resources.")
+	f.StringVar(&approveChangeFlags.name, "name", "", "Name of the resource (required).")
+	f.StringVar(&approveChangeFlags.annotationKey, "annotation-key", ewapprove.DefaultChangeApprovalAnnotation,
+		"Annotation key to write the change-approval signature to.")
+	f.StringVar(&approveChangeFlags.newResourceFile, "file", "", "Path to the YAML or JSON file containing the desired new resource state (required).")
+
+	_ = approveChangeCmd.MarkFlagRequired("private-key")
+	_ = approveChangeCmd.MarkFlagRequired("resource")
+	_ = approveChangeCmd.MarkFlagRequired("name")
+	_ = approveChangeCmd.MarkFlagRequired("file")
+}
+
+func runApproveChange(_ *cobra.Command, _ []string) error {
+	opts := ewapprove.ChangeOptions{
+		PrivateKeyPath:  approveChangeFlags.privateKeyPath,
+		Kubeconfig:      approveChangeFlags.kubeconfig,
+		Group:           approveChangeFlags.group,
+		Version:         approveChangeFlags.version,
+		Resource:        approveChangeFlags.resource,
+		Namespace:       approveChangeFlags.namespace,
+		Name:            approveChangeFlags.name,
+		AnnotationKey:   approveChangeFlags.annotationKey,
+		NewResourceFile: approveChangeFlags.newResourceFile,
+	}
+
+	if err := ewapprove.RunChange(opts); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return err
 	}
