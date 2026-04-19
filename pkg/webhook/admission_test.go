@@ -1650,6 +1650,102 @@ func TestEvaluateCheckLock_AllowedWhenNoObjectData(t *testing.T) {
 	}
 }
 
+// TestEvaluateCheckLock_AllowedForUpdateThatOnlyRemovesLock verifies that an
+// UPDATE whose only change is removing the earlywatch.io/lock annotation is
+// allowed even when LockOnMutate is true.  This is the "unlock" path that
+// operators rely on to release a locked resource.
+func TestEvaluateCheckLock_AllowedForUpdateThatOnlyRemovesLock(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	// Old object is locked.
+	oldObj := lockedServiceObj("my-svc", "default")
+	// New object is identical except the lock annotation has been removed.
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	oldRaw, err := json.Marshal(oldObj)
+	if err != nil {
+		t.Fatalf("marshaling old object: %v", err)
+	}
+	newRaw, err := json.Marshal(newObj)
+	if err != nil {
+		t.Fatalf("marshaling new object: %v", err)
+	}
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: oldRaw},
+			Object:    runtime.RawExtension{Raw: newRaw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated when the only change is removing the lock annotation")
+	}
+}
+
+// TestEvaluateCheckLock_DeniedForUpdateThatChangesMoreThanLock verifies that
+// an UPDATE which removes the lock annotation AND changes other fields is
+// still denied.
+func TestEvaluateCheckLock_DeniedForUpdateThatChangesMoreThanLock(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	// Old object is locked.
+	oldObj := lockedServiceObj("my-svc", "default")
+	// New object removes the lock but also changes another field (spec).
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"clusterIP": "10.0.0.2",
+		},
+	}
+	oldRaw, err := json.Marshal(oldObj)
+	if err != nil {
+		t.Fatalf("marshaling old object: %v", err)
+	}
+	newRaw, err := json.Marshal(newObj)
+	if err != nil {
+		t.Fatalf("marshaling new object: %v", err)
+	}
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: oldRaw},
+			Object:    runtime.RawExtension{Raw: newRaw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected CheckLock to be violated when the UPDATE changes fields beyond the lock annotation")
+	}
+}
+
 // TestEvaluateRule_CheckLock_Violated verifies that evaluateRule correctly
 // routes CheckLock and returns a violation when the lock annotation is set.
 func TestEvaluateRule_CheckLock_Violated(t *testing.T) {
@@ -1791,6 +1887,40 @@ func makeUpdateRequest(group, resource, namespace, name string, oldObj interface
 	}
 }
 
+// makeUpdateRequestFull builds an admission.Request for an UPDATE operation
+// with both OldObject (pre-update) and Object (post-update) populated.
+func makeUpdateRequestFull(group, resource, namespace, name string, oldObj, newObj interface{}) admission.Request {
+	var rawOld, rawNew []byte
+	if oldObj != nil {
+		var err error
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if newObj != nil {
+		var err error
+		rawNew, err = json.Marshal(newObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+			Object:    runtime.RawExtension{Raw: rawNew},
+		},
+	}
+}
+
 // TestHandle_CheckLock_LockOnMutate_DeniedWhenLocked verifies the full
 // admission pipeline rejects an UPDATE when LockOnMutate is true and the
 // current resource carries the lock annotation.
@@ -1817,8 +1947,23 @@ func TestHandle_CheckLock_LockOnMutate_DeniedWhenLocked(t *testing.T) {
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
 	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
 
-	obj := lockedServiceObj("my-svc", "default")
-	req := makeUpdateRequest("", "services", "default", "my-svc", obj)
+	// Old (locked) and new objects both with the lock (not an unlock attempt).
+	oldObj := lockedServiceObj("my-svc", "default")
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+			"annotations": map[string]interface{}{
+				ewv1alpha1.LockAnnotation: "true",
+			},
+		},
+		"spec": map[string]interface{}{
+			"clusterIP": "10.0.0.2",
+		},
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldObj, newObj)
 	resp := h.Handle(context.Background(), req)
 	if resp.Allowed {
 		t.Error("expected UPDATE to be denied because the service carries the lock annotation and LockOnMutate is true")
@@ -1859,6 +2004,49 @@ func TestHandle_CheckLock_LockOnMutate_AllowedWhenNotLocked(t *testing.T) {
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
 		t.Errorf("expected UPDATE to be allowed when no lock annotation is set: %v", resp.Result)
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_AllowedWhenUnlocking verifies that an
+// UPDATE that removes the lock annotation (and changes nothing else) is
+// allowed even when LockOnMutate is true.
+func TestHandle_CheckLock_LockOnMutate_AllowedWhenUnlocking(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// Old object carries the lock; new object is identical except the lock is removed.
+	oldObj := lockedServiceObj("my-svc", "default")
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldObj, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when the only change is removing the lock annotation: %v", resp.Result)
 	}
 }
 

@@ -88,3 +88,11 @@ kubectl annotate deployment my-app earlywatch.io/lock-
 ```
 
 The annotation value is purely descriptive — it is not interpreted by the webhook.  Use it to record who placed the lock and why.
+
+### Unlocking when `lockOnMutate: true`
+
+When `lockOnMutate: true` is configured, UPDATE requests on a locked resource are normally denied.  However, there is an intentional exception: **an UPDATE whose only change is removing or clearing the `earlywatch.io/lock` annotation is always allowed**, regardless of whether `lockOnMutate` is set.
+
+This means that `kubectl annotate deployment my-app earlywatch.io/lock-` will always succeed and unlock the resource.  Once the lock annotation is gone, subsequent UPDATE requests proceed normally.
+
+If the annotation removal is combined with other field changes in the same UPDATE request, the request is denied.  The operator must first unlock the resource in a dedicated step, then apply further changes.

@@ -2,6 +2,7 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rsa"
@@ -392,6 +393,11 @@ func selectorFromField(raw []byte, fieldPath string) (labels.Selector, error) {
 // the earlywatch.io/lock annotation.  When cfg is non-nil and LockOnMutate is
 // true the check is also applied to UPDATE requests.  For all other operations
 // the check is a no-op.
+//
+// Special case for UPDATE with LockOnMutate: if the only change between the
+// old and new object is the removal or clearing of the earlywatch.io/lock
+// annotation itself, the UPDATE is allowed so that operators can always
+// unlock a resource.
 func evaluateCheckLock(cfg *ewv1alpha1.CheckLockRule, message string, req admission.Request) (bool, string, error) {
 	lockOnMutate := cfg != nil && cfg.LockOnMutate != nil && *cfg.LockOnMutate
 
@@ -401,6 +407,19 @@ func evaluateCheckLock(cfg *ewv1alpha1.CheckLockRule, message string, req admiss
 	case admissionv1.Update:
 		if !lockOnMutate {
 			return false, "", nil
+		}
+		// Special case: always allow an UPDATE whose only change is removing
+		// or clearing the earlywatch.io/lock annotation.  This ensures that
+		// an operator can always unlock a resource, even when lockOnMutate
+		// is true.
+		if len(req.OldObject.Raw) > 0 && len(req.Object.Raw) > 0 {
+			onlyLock, err := isOnlyLockAnnotationChange(req.OldObject.Raw, req.Object.Raw)
+			if err != nil {
+				return false, "", fmt.Errorf("comparing old and new object for lock annotation change: %w", err)
+			}
+			if onlyLock {
+				return false, "", nil
+			}
 		}
 		// continue below
 	default:
@@ -435,6 +454,54 @@ func evaluateCheckLock(cfg *ewv1alpha1.CheckLockRule, message string, req admiss
 		return true, message, nil
 	}
 	return false, "", nil
+}
+
+// isOnlyLockAnnotationChange reports whether the only difference between
+// oldRaw and newRaw is the removal or clearing of the earlywatch.io/lock
+// annotation.  It strips the lock annotation key from both objects and
+// compares the JSON-encoded results; if they are equal, no other fields
+// changed.
+func isOnlyLockAnnotationChange(oldRaw, newRaw []byte) (bool, error) {
+	var oldObj, newObj map[string]interface{}
+	if err := json.Unmarshal(oldRaw, &oldObj); err != nil {
+		return false, fmt.Errorf("unmarshalling old object: %w", err)
+	}
+	if err := json.Unmarshal(newRaw, &newObj); err != nil {
+		return false, fmt.Errorf("unmarshalling new object: %w", err)
+	}
+
+	stripLockAnnotation(oldObj)
+	stripLockAnnotation(newObj)
+
+	oldJSON, err := json.Marshal(oldObj)
+	if err != nil {
+		return false, fmt.Errorf("marshaling old object: %w", err)
+	}
+	newJSON, err := json.Marshal(newObj)
+	if err != nil {
+		return false, fmt.Errorf("marshaling new object: %w", err)
+	}
+	return bytes.Equal(oldJSON, newJSON), nil
+}
+
+// stripLockAnnotation removes the earlywatch.io/lock annotation from an
+// unmarshalled object's metadata in place.  If the annotations map becomes
+// empty after removal, the "annotations" key is also deleted so that the
+// comparison in isOnlyLockAnnotationChange is not skewed by an empty map
+// versus an absent key.
+func stripLockAnnotation(obj map[string]interface{}) {
+	metadata, ok := obj["metadata"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	annotations, ok := metadata["annotations"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	delete(annotations, ewv1alpha1.LockAnnotation)
+	if len(annotations) == 0 {
+		delete(metadata, "annotations")
+	}
 }
 
 // evaluateExpression evaluates a CEL expression check against the admission
