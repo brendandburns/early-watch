@@ -43,6 +43,8 @@ RESET=$'\033[0m'
 # ── Common paths ─────────────────────────────────────────────────────────────
 # shellcheck disable=SC2034  # used by the scripts that source this file
 CLUSTER_NAME="earlywatch-demo"
+# shellcheck disable=SC2034  # used by the scripts that source this file
+DEMO_NS="${DEMO_NS:-default}"
 # BASH_SOURCE[1] is the script that sourced this file; resolve from its directory.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)"
 # shellcheck disable=SC2034  # used by the scripts that source this file
