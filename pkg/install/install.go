@@ -26,11 +26,11 @@ var manifestsFS embed.FS
 
 // defaultWebhookImage is the container image used by the webhook Deployment
 // when no override is provided.
-const defaultWebhookImage = "early-watch:latest"
+const defaultWebhookImage = "early-watch:v0.0.1"
 
 // defaultAuditMonitorImage is the container image used by the audit-monitor
 // Deployment when no override is provided.
-const defaultAuditMonitorImage = "early-watch-audit-monitor:latest"
+const defaultAuditMonitorImage = "early-watch-audit-monitor:v0.0.1"
 
 // defaultNamespace is the Kubernetes namespace used for EarlyWatch resources
 // when no override is provided via Options.Namespace.
