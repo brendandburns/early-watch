@@ -6,10 +6,9 @@
 #   • Checks that required tools are present
 #   • Creates a kind cluster named "earlywatch-demo"
 #   • Downloads the watchctl CLI from the latest GitHub release (or builds it)
-#   • Installs EarlyWatch onto the cluster
-#   • Inspects the installed resources so you can confirm everything is healthy
 #
 # Run this once, then run scripts/demo.sh to walk through the demo scenarios.
+# demo.sh will install EarlyWatch onto the cluster and walk through the demos.
 #
 # Prerequisites (all must be on your PATH):
 #   • kind    — https://kind.sigs.k8s.io/docs/user/quick-start/#installation
@@ -19,25 +18,20 @@
 #   • go      — https://go.dev/doc/install  (only required with --build)
 #
 # Usage:
-#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build] [--image-pull-secret=<path>]
+#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build]
 #
-#   --skip-cluster-create        Reuse an existing kind cluster named "earlywatch-demo"
-#   --build                      Build watchctl from source instead of downloading it
-#   --image-pull-secret=<path>   Path to a Docker config JSON file (e.g. ~/.docker/config.json)
-#                                used to pull images from a private registry. The script creates
-#                                a Kubernetes Secret named "pullSecret" in the early-watch-system
-#                                namespace from this file (optional)
+#   --skip-cluster-create  Reuse an existing kind cluster named "earlywatch-demo"
+#   --build                Build watchctl from source instead of downloading it.
+#                          Requires go on your PATH.
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLUSTER_CREATE=false
 BUILD_WATCHCTL=false
-IMAGE_PULL_SECRET=""
 for arg in "$@"; do
   case "$arg" in
     --skip-cluster-create) SKIP_CLUSTER_CREATE=true ;;
     --build)               BUILD_WATCHCTL=true ;;
-    --image-pull-secret=*) IMAGE_PULL_SECRET="${arg#--image-pull-secret=}" ;;
   esac
 done
 
@@ -64,7 +58,7 @@ trap '_on_exit' EXIT
 clear
 echo "${BOLD}EarlyWatch Demo — Setup${RESET}"
 echo ""
-echo "This script prepares a local kind cluster with EarlyWatch installed."
+echo "This script prepares a local kind cluster for EarlyWatch."
 echo "It covers:"
 echo "  1. Prerequisite check"
 echo "  2. kind cluster creation"
@@ -73,12 +67,11 @@ if [ "$BUILD_WATCHCTL" = "true" ]; then
 else
   echo "  3. Downloading the watchctl CLI from the latest GitHub release"
 fi
-echo "  4. Installing EarlyWatch onto the cluster"
-echo "  5. Inspecting the installed resources"
 echo ""
 echo "Once setup is complete, run ${BOLD}scripts/demo.sh${RESET} for the interactive demo."
+echo "(demo.sh will install EarlyWatch onto the cluster.)"
 echo ""
-echo "${DIM}Estimated run time: ~3 minutes${RESET}"
+echo "${DIM}Estimated run time: ~1 minute${RESET}"
 pause
 
 # ── Step 0: Prerequisite check ───────────────────────────────────────────────
@@ -158,6 +151,7 @@ if [ "$BUILD_WATCHCTL" = "true" ]; then
   run_cmd "$REPO_ROOT/scripts/build.sh" "$REPO_ROOT/watchctl"
 
   print_success "watchctl built successfully at $WATCHCTL"
+  pause
 else
   print_header "Step 2 — Download the watchctl CLI"
   print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
@@ -204,84 +198,13 @@ else
   run_cmd chmod +x "${WATCHCTL}"
 
   print_success "watchctl ${LATEST_TAG} downloaded successfully at $WATCHCTL"
+  pause
 fi
-pause
-
-# ── Step 3: Install EarlyWatch ───────────────────────────────────────────────
-print_header "Step 3 — Install EarlyWatch onto the Cluster"
-print_info "watchctl install applies the following resources in one go:"
-print_info "  • ChangeValidator CRD  — defines the custom resource type"
-print_info "  • RBAC (ClusterRole + ClusterRoleBinding + ServiceAccount)"
-print_info "  • Webhook Deployment   — the admission controller pod"
-print_info "  • Webhook Service      — exposes the controller inside the cluster"
-print_info "  • ValidatingWebhookConfiguration — registers with the API server"
-print_info ""
-print_info "The install is idempotent; running it twice is safe."
-print_info ""
-print_info "Expected outcome: all EarlyWatch components are Running in the"
-print_info "'early-watch-system' namespace."
-pause
-
-INSTALL_ARGS=("--kubeconfig" "$HOME/.kube/config")
-if [ -n "$IMAGE_PULL_SECRET" ]; then
-  if [ ! -f "$IMAGE_PULL_SECRET" ]; then
-    print_error "Docker config file not found: $IMAGE_PULL_SECRET"
-    exit 1
-  fi
-  print_info "Ensuring namespace 'early-watch-system' exists..."
-  run_cmd "kubectl create namespace early-watch-system --dry-run=client -o yaml | kubectl apply -f -"
-  print_info "Creating image pull secret 'pullSecret' in early-watch-system..."
-  run_cmd "kubectl create secret generic pullSecret \
-    --from-file=.dockerconfigjson=\"$IMAGE_PULL_SECRET\" \
-    --type=kubernetes.io/dockerconfigjson \
-    --namespace=early-watch-system \
-    --dry-run=client -o yaml \
-    | kubectl apply -f -"
-  INSTALL_ARGS+=("--image-pull-secret" "pullSecret")
-fi
-run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
-
-echo ""
-print_info "Waiting for the webhook deployment to become ready (up to 120s)..."
-run_cmd kubectl rollout status deployment/early-watch-webhook \
-  -n early-watch-system --timeout=120s
-
-print_success "EarlyWatch is installed and ready."
-pause
-
-# ── Step 4: Inspect installed resources ─────────────────────────────────────
-print_header "Step 4 — Inspect the Installed Resources"
-print_info "Let's take a look at what was created."
-print_info ""
-print_info "You should see:"
-print_info "  • The 'early-watch-system' namespace"
-print_info "  • The webhook pod in a Running state"
-print_info "  • The 'changevalidators.earlywatch.io' CRD"
-print_info "  • The ValidatingWebhookConfiguration that hooks into the API server"
-pause
-
-echo ""
-echo "${BOLD}Namespace:${RESET}"
-run_cmd kubectl get namespace early-watch-system
-
-echo ""
-echo "${BOLD}Pods in early-watch-system:${RESET}"
-run_cmd kubectl get pods -n early-watch-system
-
-echo ""
-echo "${BOLD}ChangeValidator CRD:${RESET}"
-run_cmd kubectl get crd changevalidators.earlywatch.io
-
-echo ""
-echo "${BOLD}ValidatingWebhookConfiguration:${RESET}"
-run_cmd kubectl get validatingwebhookconfiguration early-watch-validating-webhook
-
-pause
 
 # ── Setup complete ───────────────────────────────────────────────────────────
 print_header "Setup Complete!"
 echo ""
-echo "Your kind cluster '${CLUSTER_NAME}' has EarlyWatch installed and running."
+echo "Your kind cluster '${CLUSTER_NAME}' is up and running with watchctl ready."
 echo ""
 echo "  ${GREEN}✔${RESET}  Prerequisites verified"
 echo "  ${GREEN}✔${RESET}  kind cluster '${CLUSTER_NAME}' created"
@@ -290,11 +213,10 @@ if [ "$BUILD_WATCHCTL" = "true" ]; then
 else
   echo "  ${GREEN}✔${RESET}  watchctl downloaded from latest release"
 fi
-echo "  ${GREEN}✔${RESET}  EarlyWatch installed and webhook ready"
 echo ""
-echo "Next step — run the interactive demo:"
+echo "Next step — run the interactive demo (installs EarlyWatch + walks through scenarios):"
 echo ""
 echo "${BOLD}   bash scripts/demo.sh${RESET}"
 echo ""
-echo "${DIM}Pass --skip-cleanup to keep the cluster running after the demo.${RESET}"
+echo "${DIM}Pass --skip-earlywatch-install to demo.sh if EarlyWatch is already on the cluster.${RESET}"
 echo ""
