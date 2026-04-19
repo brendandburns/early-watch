@@ -19,12 +19,14 @@
 #   • go      — https://go.dev/doc/install  (only required with --build)
 #
 # Usage:
-#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build] [--image-pull-secret=<name>]
+#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build] [--image-pull-secret=<path>]
 #
 #   --skip-cluster-create        Reuse an existing kind cluster named "earlywatch-demo"
 #   --build                      Build watchctl from source instead of downloading it
-#   --image-pull-secret=<name>   Name of an existing Kubernetes Secret for pulling images
-#                                from a private registry (optional)
+#   --image-pull-secret=<path>   Path to a Docker config JSON file (e.g. ~/.docker/config.json)
+#                                used to pull images from a private registry. The script creates
+#                                a Kubernetes Secret named "pullSecret" in the early-watch-system
+#                                namespace from this file (optional)
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
@@ -207,7 +209,21 @@ pause
 
 INSTALL_ARGS=("--kubeconfig" "$HOME/.kube/config")
 if [ -n "$IMAGE_PULL_SECRET" ]; then
-  INSTALL_ARGS+=("--image-pull-secret" "$IMAGE_PULL_SECRET")
+  if [ ! -f "$IMAGE_PULL_SECRET" ]; then
+    print_error "Docker config file not found: $IMAGE_PULL_SECRET"
+    exit 1
+  fi
+  print_info "Ensuring namespace 'early-watch-system' exists..."
+  run_cmd kubectl create namespace early-watch-system --dry-run=client -o yaml \
+    | kubectl apply -f -
+  print_info "Creating image pull secret 'pullSecret' in early-watch-system..."
+  run_cmd kubectl create secret generic pullSecret \
+    --from-file=.dockerconfigjson="$IMAGE_PULL_SECRET" \
+    --type=kubernetes.io/dockerconfigjson \
+    --namespace=early-watch-system \
+    --dry-run=client -o yaml \
+    | kubectl apply -f -
+  INSTALL_ARGS+=("--image-pull-secret" "pullSecret")
 fi
 run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
 
