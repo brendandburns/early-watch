@@ -1501,7 +1501,7 @@ func TestEvaluateCheckLock_AllowedWhenAnnotationEmpty(t *testing.T) {
 	}
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1516,7 +1516,7 @@ func TestEvaluateCheckLock_DeniedWhenAnnotationPresent(t *testing.T) {
 	obj := lockedServiceObj("my-svc", "default")
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
 
-	violated, msg, err := evaluateCheckLock("resource is locked", req)
+	violated, msg, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1541,7 +1541,7 @@ func TestEvaluateCheckLock_AllowedWhenAnnotationAbsent(t *testing.T) {
 	}
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1550,9 +1550,9 @@ func TestEvaluateCheckLock_AllowedWhenAnnotationAbsent(t *testing.T) {
 	}
 }
 
-// TestEvaluateCheckLock_AllowedForNonDeleteOperation verifies that non-DELETE
-// operations are never blocked by the CheckLock rule.
-func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
+// TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateNotSet verifies that an
+// UPDATE operation is not blocked when LockOnMutate is not configured.
+func TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateNotSet(t *testing.T) {
 	obj := lockedServiceObj("my-svc", "default")
 	raw, _ := json.Marshal(obj)
 	req := admission.Request{
@@ -1561,16 +1561,78 @@ func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
 			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
 			Namespace: "default",
 			Name:      "my-svc",
-			Object:    runtime.RawExtension{Raw: raw},
+			OldObject: runtime.RawExtension{Raw: raw},
 		},
 	}
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if violated {
-		t.Error("expected CheckLock NOT to be violated for a non-DELETE operation")
+		t.Error("expected CheckLock NOT to be violated for UPDATE when LockOnMutate is not set")
+	}
+}
+
+// TestEvaluateCheckLock_DeniedForUpdateWhenLockOnMutateTrue verifies that an
+// UPDATE request is denied when LockOnMutate is true and the object is locked.
+func TestEvaluateCheckLock_DeniedForUpdateWhenLockOnMutateTrue(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	obj := lockedServiceObj("my-svc", "default")
+	raw, _ := json.Marshal(obj)
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	violated, msg, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected CheckLock to be violated for UPDATE when LockOnMutate is true and lock annotation is set")
+	}
+	if msg != "resource is locked" {
+		t.Errorf("unexpected message: %q", msg)
+	}
+}
+
+// TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateTrueButNotLocked verifies
+// that an UPDATE request is allowed when LockOnMutate is true but the object
+// does not carry the lock annotation.
+func TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateTrueButNotLocked(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+	}
+	raw, _ := json.Marshal(obj)
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated for UPDATE when LockOnMutate is true but lock annotation is absent")
 	}
 }
 
@@ -1579,12 +1641,108 @@ func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
 func TestEvaluateCheckLock_AllowedWhenNoObjectData(t *testing.T) {
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", nil)
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if violated {
 		t.Error("expected CheckLock NOT to be violated when no object data is present")
+	}
+}
+
+// TestEvaluateCheckLock_AllowedForUpdateThatOnlyRemovesLock verifies that an
+// UPDATE whose only change is removing the earlywatch.io/lock annotation is
+// allowed even when LockOnMutate is true.  This is the "unlock" path that
+// operators rely on to release a locked resource.
+func TestEvaluateCheckLock_AllowedForUpdateThatOnlyRemovesLock(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	// Old object is locked.
+	oldObj := lockedServiceObj("my-svc", "default")
+	// New object is identical except the lock annotation has been removed.
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	oldRaw, err := json.Marshal(oldObj)
+	if err != nil {
+		t.Fatalf("marshaling old object: %v", err)
+	}
+	newRaw, err := json.Marshal(newObj)
+	if err != nil {
+		t.Fatalf("marshaling new object: %v", err)
+	}
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: oldRaw},
+			Object:    runtime.RawExtension{Raw: newRaw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated when the only change is removing the lock annotation")
+	}
+}
+
+// TestEvaluateCheckLock_DeniedForUpdateThatChangesMoreThanLock verifies that
+// an UPDATE which removes the lock annotation AND changes other fields is
+// still denied.
+func TestEvaluateCheckLock_DeniedForUpdateThatChangesMoreThanLock(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	// Old object is locked.
+	oldObj := lockedServiceObj("my-svc", "default")
+	// New object removes the lock but also changes another field (spec).
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"clusterIP": "10.0.0.2",
+		},
+	}
+	oldRaw, err := json.Marshal(oldObj)
+	if err != nil {
+		t.Fatalf("marshaling old object: %v", err)
+	}
+	newRaw, err := json.Marshal(newObj)
+	if err != nil {
+		t.Fatalf("marshaling new object: %v", err)
+	}
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: oldRaw},
+			Object:    runtime.RawExtension{Raw: newRaw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected CheckLock to be violated when the UPDATE changes fields beyond the lock annotation")
 	}
 }
 
@@ -1700,6 +1858,195 @@ func TestHandle_CheckLock_AllowedWhenNotLocked(t *testing.T) {
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
 		t.Errorf("expected DELETE to be allowed when no lock annotation is set: %v", resp.Result)
+	}
+}
+
+// makeUpdateRequest builds an admission.Request for an UPDATE operation,
+// placing the pre-update object in OldObject.
+func makeUpdateRequest(group, resource, namespace, name string, oldObj interface{}) admission.Request {
+	var rawOld []byte
+	if oldObj != nil {
+		var err error
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+		},
+	}
+}
+
+// makeUpdateRequestFull builds an admission.Request for an UPDATE operation
+// with both OldObject (pre-update) and Object (post-update) populated.
+func makeUpdateRequestFull(group, resource, namespace, name string, oldObj, newObj interface{}) admission.Request {
+	var rawOld, rawNew []byte
+	if oldObj != nil {
+		var err error
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if newObj != nil {
+		var err error
+		rawNew, err = json.Marshal(newObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+			Object:    runtime.RawExtension{Raw: rawNew},
+		},
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_DeniedWhenLocked verifies the full
+// admission pipeline rejects an UPDATE when LockOnMutate is true and the
+// current resource carries the lock annotation.
+func TestHandle_CheckLock_LockOnMutate_DeniedWhenLocked(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// Old (locked) and new objects both with the lock (not an unlock attempt).
+	oldObj := lockedServiceObj("my-svc", "default")
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+			"annotations": map[string]interface{}{
+				ewv1alpha1.LockAnnotation: "true",
+			},
+		},
+		"spec": map[string]interface{}{
+			"clusterIP": "10.0.0.2",
+		},
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldObj, newObj)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because the service carries the lock annotation and LockOnMutate is true")
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_AllowedWhenNotLocked verifies that an
+// UPDATE is allowed when LockOnMutate is true but the object is not locked.
+func TestHandle_CheckLock_LockOnMutate_AllowedWhenNotLocked(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+	}
+	req := makeUpdateRequest("", "services", "default", "my-svc", obj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when no lock annotation is set: %v", resp.Result)
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_AllowedWhenUnlocking verifies that an
+// UPDATE that removes the lock annotation (and changes nothing else) is
+// allowed even when LockOnMutate is true.
+func TestHandle_CheckLock_LockOnMutate_AllowedWhenUnlocking(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// Old object carries the lock; new object is identical except the lock is removed.
+	oldObj := lockedServiceObj("my-svc", "default")
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldObj, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when the only change is removing the lock annotation: %v", resp.Result)
 	}
 }
 
@@ -1932,39 +2279,6 @@ func serviceObj(selector map[string]string, clusterIP string) map[string]interfa
 	}
 }
 
-// makeUpdateRequest builds an admission.Request for an UPDATE operation.
-func makeUpdateRequest(group, resource, namespace, name string, oldObj, newObj interface{}) admission.Request {
-	var rawOld, rawNew []byte
-	if oldObj != nil {
-		var err error
-		rawOld, err = json.Marshal(oldObj)
-		if err != nil {
-			panic(err)
-		}
-	}
-	if newObj != nil {
-		var err error
-		rawNew, err = json.Marshal(newObj)
-		if err != nil {
-			panic(err)
-		}
-	}
-	return admission.Request{
-		AdmissionRequest: admissionv1.AdmissionRequest{
-			Operation: admissionv1.Update,
-			Resource: metav1.GroupVersionResource{
-				Group:    group,
-				Version:  "v1",
-				Resource: resource,
-			},
-			Namespace: namespace,
-			Name:      name,
-			OldObject: runtime.RawExtension{Raw: rawOld},
-			Object:    runtime.RawExtension{Raw: rawNew},
-		},
-	}
-}
-
 // newServicePodSelectorGuard builds a ChangeValidator that uses the
 // ServicePodSelectorCheck rule to protect Service UPDATE operations.
 func newServicePodSelectorGuard() *ewv1alpha1.ChangeValidator {
@@ -1998,7 +2312,7 @@ func TestEvaluateRule_NilServicePodSelectorCheck(t *testing.T) {
 		Message:                 "msg",
 		ServicePodSelectorCheck: nil,
 	}
-	req := makeUpdateRequest("", "services", "default", "my-svc", serviceObj(nil, ""), serviceObj(nil, ""))
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", serviceObj(nil, ""), serviceObj(nil, ""))
 	_, _, err := h.evaluateRule(context.Background(), rule, req)
 	if err == nil {
 		t.Error("expected error for nil ServicePodSelectorCheck config")
@@ -2032,7 +2346,7 @@ func TestServicePodSelectorCheck_OldNoSelector_Allowed(t *testing.T) {
 
 	oldSvc := serviceObj(nil, "")
 	newSvc := serviceObj(map[string]string{"app": "other"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2052,7 +2366,7 @@ func TestServicePodSelectorCheck_HeadlessNoSelector_Allowed(t *testing.T) {
 
 	oldSvc := serviceObj(nil, "None")
 	newSvc := serviceObj(map[string]string{"app": "other"}, "10.0.0.1")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2081,7 +2395,7 @@ func TestServicePodSelectorCheck_HeadlessWithSelector_Allowed(t *testing.T) {
 	// Headless service with a selector that matches a pod; change would drop pods.
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "None")
 	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "None")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2111,7 +2425,7 @@ func TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied(t 
 	oldSvc := serviceObj(map[string]string{}, "")
 	// New selector has no matching pods.
 	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2140,7 +2454,7 @@ func TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed(t *testing.
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	// New service uses spec.selector: {} which matches all pods.
 	newSvc := serviceObj(map[string]string{}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2160,7 +2474,7 @@ func TestServicePodSelectorCheck_OldNoPods_Allowed(t *testing.T) {
 
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2188,7 +2502,7 @@ func TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed(t *testing.T) {
 	// Old and new service both select the same pod.
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(map[string]string{"app": "my-app"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2215,7 +2529,7 @@ func TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied(t *testing.T) {
 
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(nil, "") // selector removed
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, msg, err := h.evaluateServicePodSelectorCheck(context.Background(), "selector change denied", req)
 	if err != nil {
@@ -2245,7 +2559,7 @@ func TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied(t *testing.T) {
 
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "") // different selector, no pods
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
 	if err != nil {
@@ -2276,7 +2590,7 @@ func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
 
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	resp := h.Handle(context.Background(), req)
 	if resp.Allowed {
@@ -2304,7 +2618,7 @@ func TestHandle_ServicePodSelectorCheck_Allowed(t *testing.T) {
 
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(map[string]string{"app": "my-app"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
@@ -2325,7 +2639,7 @@ func TestHandle_ServicePodSelectorCheck_NoPreviousPods_Allowed(t *testing.T) {
 
 	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
 	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
-	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
 
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
