@@ -32,6 +32,11 @@ DEMO_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --output)
+      if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "Missing value for --output" >&2
+        echo "Usage: bash scripts/record-demo.sh [--output <name>] [--skip-cleanup]" >&2
+        exit 1
+      fi
       OUTPUT_NAME="$2"
       shift 2
       ;;
