@@ -24,9 +24,12 @@ import (
 //go:embed manifests
 var manifestsFS embed.FS
 
-// Version is the current release of EarlyWatch. It is the single source of
-// truth from which the default container image tags are derived.
-const Version = "v0.0.1"
+// Version is the current release of EarlyWatch. It is set at build time via:
+//
+//	go build -ldflags "-X github.com/brendandburns/early-watch/pkg/install.Version=<git-tag>" ./cmd/watchctl
+//
+// When built without the flag the value defaults to "latest".
+var Version = "latest"
 
 // webhookImagePlaceholder is the stable token embedded in the webhook YAML
 // manifests. It is replaced with the actual image at apply time so that the
