@@ -67,7 +67,7 @@ type GuardRule struct {
 	Name string `json:"name"`
 
 	// Type selects the kind of check to perform.
-	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck;AnnotationCheck;CheckLock;ManualTouchCheck
+	// +kubebuilder:validation:Enum=ExistingResources;ExpressionCheck;NameReferenceCheck;ApprovalCheck;AnnotationCheck;CheckLock;ManualTouchCheck;DataKeySafetyCheck
 	Type RuleType `json:"type"`
 
 	// ExistingResources configures a check that queries the cluster for
@@ -112,6 +112,13 @@ type GuardRule struct {
 	// Required when Type is ManualTouchCheck.
 	// +optional
 	ManualTouchCheck *ManualTouchCheck `json:"manualTouchCheck,omitempty"`
+
+	// DataKeySafetyCheck prevents UPDATE requests that remove a data key
+	// from a ConfigMap or Secret when that specific key is still referenced
+	// by another resource.
+	// Required when Type is DataKeySafetyCheck.
+	// +optional
+	DataKeySafetyCheck *DataKeySafetyCheck `json:"dataKeySafetyCheck,omitempty"`
 
 	// Message is the human-readable denial message returned to the user
 	// when this rule is violated.
@@ -174,6 +181,12 @@ const (
 	// touch (kubectl DELETE/CREATE/UPDATE) has been recorded for the same
 	// resource within a configurable look-back window.
 	RuleTypeManualTouchCheck RuleType = "ManualTouchCheck"
+
+	// RuleTypeDataKeySafetyCheck denies an UPDATE when a data key is removed
+	// from a ConfigMap or Secret that is still referenced by its specific key
+	// name in another cluster resource (e.g. a Pod's configMapKeyRef or
+	// secretKeyRef).
+	RuleTypeDataKeySafetyCheck RuleType = "DataKeySafetyCheck"
 )
 
 // ExistingResourcesCheck describes a check that looks for dependent
@@ -338,4 +351,65 @@ type ApprovalCheck struct {
 	// Defaults to "earlywatch.io/approved".
 	// +optional
 	AnnotationKey string `json:"annotationKey,omitempty"`
+}
+
+// DataKeySafetyCheck describes a check that prevents UPDATE requests from
+// removing a data key from a ConfigMap or Secret when that specific key is
+// still referenced (by both resource name and key name) in another cluster
+// resource.
+type DataKeySafetyCheck struct {
+	// Resources is the list of resource types to scan for key references.
+	// +kubebuilder:validation:MinItems=1
+	Resources []DataKeyReferenceResource `json:"resources"`
+
+	// SameNamespace, when true, restricts the lookup to the same namespace
+	// as the subject resource.  Defaults to true.
+	// +kubebuilder:default=true
+	// +optional
+	SameNamespace *bool `json:"sameNamespace,omitempty"`
+}
+
+// DataKeyReferenceResource describes a resource type to scan for references
+// that pair a ConfigMap or Secret name with a specific data key.
+type DataKeyReferenceResource struct {
+	// APIGroup is the API group of the resource type to scan.
+	// Use "" for core resources and "apps" for Deployments/DaemonSets.
+	// +optional
+	APIGroup string `json:"apiGroup,omitempty"`
+
+	// Resource is the plural name of the resource type to scan,
+	// e.g. "pods", "deployments".
+	Resource string `json:"resource"`
+
+	// Version is the API version of the resource type to scan.
+	// Defaults to "v1" when omitted.
+	// +optional
+	Version string `json:"version,omitempty"`
+
+	// KeyReferenceFields is the list of field-path descriptors that identify
+	// locations in the resource where a ConfigMap or Secret name and a data
+	// key are referenced together.
+	// +kubebuilder:validation:MinItems=1
+	KeyReferenceFields []KeyReferenceField `json:"keyReferenceFields"`
+}
+
+// KeyReferenceField describes a single location in a resource where a
+// ConfigMap or Secret name and a specific data key appear together as
+// sibling fields within the same JSON object.
+type KeyReferenceField struct {
+	// RefPath is the dot-separated JSON path to the object that contains
+	// both the name and key sub-fields.  Array elements encountered along
+	// the path are traversed automatically.
+	// Example: "spec.template.spec.containers.env.valueFrom.configMapKeyRef"
+	RefPath string `json:"refPath"`
+
+	// NameSubField is the field name within the RefPath object that holds
+	// the ConfigMap or Secret name.  Defaults to "name".
+	// +optional
+	NameSubField string `json:"nameSubField,omitempty"`
+
+	// KeySubField is the field name within the RefPath object that holds
+	// the data key.  Defaults to "key".
+	// +optional
+	KeySubField string `json:"keySubField,omitempty"`
 }

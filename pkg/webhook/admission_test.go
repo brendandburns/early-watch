@@ -1906,3 +1906,487 @@ func TestEvaluateManualTouchCheck_InvalidWindowDuration(t *testing.T) {
 		t.Error("expected error for invalid window duration")
 	}
 }
+
+// --- DataKeySafetyCheck tests ---
+
+// makeUpdateRequest builds an admission.Request for an UPDATE operation with
+// both the old and new object populated.
+func makeUpdateRequest(group, resource, namespace, name string, oldObj, newObj interface{}) admission.Request {
+	var rawOld, rawNew []byte
+	var err error
+	if oldObj != nil {
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if newObj != nil {
+		rawNew, err = json.Marshal(newObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+			Object:    runtime.RawExtension{Raw: rawNew},
+		},
+	}
+}
+
+// configMapObj builds a minimal ConfigMap-like map with the given data keys.
+func configMapObj(name, namespace string, data map[string]string) map[string]interface{} {
+	d := make(map[string]interface{}, len(data))
+	for k, v := range data {
+		d[k] = v
+	}
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]interface{}{"name": name, "namespace": namespace},
+		"data":       d,
+	}
+}
+
+// newConfigMapKeySafetyGuard returns a ChangeValidator that prevents removal
+// of ConfigMap keys that are still referenced via configMapKeyRef in Deployments.
+func newConfigMapKeySafetyGuard() *ewv1alpha1.ChangeValidator {
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-cm-keys", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "configmaps",
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-key-removal-while-in-use",
+					Type:    ewv1alpha1.RuleTypeDataKeySafetyCheck,
+					Message: "ConfigMap key is still in use",
+					DataKeySafetyCheck: &ewv1alpha1.DataKeySafetyCheck{
+						Resources: []ewv1alpha1.DataKeyReferenceResource{
+							{
+								APIGroup: "apps",
+								Resource: "deployments",
+								Version:  "v1",
+								KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+									{
+										RefPath: "spec.template.spec.containers.env.valueFrom.configMapKeyRef",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestEvaluateRule_NilDataKeySafetyCheck verifies that evaluateRule returns an
+// error when DataKeySafetyCheck is the type but the config pointer is nil.
+func TestEvaluateRule_NilDataKeySafetyCheck(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	rule := ewv1alpha1.GuardRule{
+		Name:               "bad-rule",
+		Type:               ewv1alpha1.RuleTypeDataKeySafetyCheck,
+		Message:            "msg",
+		DataKeySafetyCheck: nil,
+	}
+	req := makeUpdateRequest("", "configmaps", "default", "my-cm",
+		configMapObj("my-cm", "default", map[string]string{"key": "val"}),
+		configMapObj("my-cm", "default", map[string]string{}),
+	)
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil DataKeySafetyCheck config")
+	}
+}
+
+// TestEvaluateDataKeySafetyCheck_NotUpdate verifies that non-UPDATE operations
+// are always allowed.
+func TestEvaluateDataKeySafetyCheck_NotUpdate(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	check := ewv1alpha1.DataKeySafetyCheck{
+		Resources: []ewv1alpha1.DataKeyReferenceResource{
+			{APIGroup: "apps", Resource: "deployments", Version: "v1",
+				KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+					{RefPath: "spec.template.spec.containers.env.valueFrom.configMapKeyRef"},
+				},
+			},
+		},
+	}
+	// DELETE, not UPDATE.
+	req := makeDeleteRequest("", "configmaps", "my-cm",
+		configMapObj("my-cm", "default", map[string]string{"k": "v"}))
+
+	violated, _, err := h.evaluateDataKeySafetyCheck(context.Background(), check, "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected DataKeySafetyCheck NOT to be violated for a non-UPDATE operation")
+	}
+}
+
+// TestEvaluateDataKeySafetyCheck_NoRemovedKeys verifies that the check is not
+// violated when no data keys are removed.
+func TestEvaluateDataKeySafetyCheck_NoRemovedKeys(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	check := ewv1alpha1.DataKeySafetyCheck{
+		Resources: []ewv1alpha1.DataKeyReferenceResource{
+			{APIGroup: "apps", Resource: "deployments", Version: "v1",
+				KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+					{RefPath: "spec.template.spec.containers.env.valueFrom.configMapKeyRef"},
+				},
+			},
+		},
+	}
+	old := configMapObj("my-cm", "default", map[string]string{"key1": "v1"})
+	// Same key, just value changed – no removal.
+	newObj := configMapObj("my-cm", "default", map[string]string{"key1": "v2"})
+	req := makeUpdateRequest("", "configmaps", "default", "my-cm", old, newObj)
+
+	violated, _, err := h.evaluateDataKeySafetyCheck(context.Background(), check, "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected DataKeySafetyCheck NOT to be violated when no keys are removed")
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_DeniedWhenKeyReferencedViaConfigMapKeyRef verifies
+// that removing a ConfigMap key still referenced by a Deployment's configMapKeyRef
+// is denied.
+func TestHandle_DataKeySafetyCheck_DeniedWhenKeyReferencedViaConfigMapKeyRef(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "DB_HOST",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "my-cm"},
+											Key:                  "db-host",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapKeySafetyGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	old := configMapObj("my-cm", "default", map[string]string{"db-host": "localhost"})
+	// Remove the "db-host" key.
+	newObj := configMapObj("my-cm", "default", map[string]string{})
+	req := makeUpdateRequest("", "configmaps", "default", "my-cm", old, newObj)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because a Deployment references the removed key via configMapKeyRef")
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_AllowedWhenKeyNotReferenced verifies that
+// removing a ConfigMap key that is not referenced by any workload is allowed.
+func TestHandle_DataKeySafetyCheck_AllowedWhenKeyNotReferenced(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	// Deployment references a different key ("other-key"), not "db-host".
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "OTHER",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "my-cm"},
+											Key:                  "other-key",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapKeySafetyGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	old := configMapObj("my-cm", "default", map[string]string{"db-host": "localhost", "other-key": "v"})
+	// Remove only "db-host"; "other-key" stays.
+	newObj := configMapObj("my-cm", "default", map[string]string{"other-key": "v"})
+	req := makeUpdateRequest("", "configmaps", "default", "my-cm", old, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when the removed key is not referenced: %v", resp.Result)
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_AllowedWhenNoWorkloads verifies that a key
+// removal is allowed when no dependent workloads exist.
+func TestHandle_DataKeySafetyCheck_AllowedWhenNoWorkloads(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	guard := newConfigMapKeySafetyGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no workloads
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	old := configMapObj("my-cm", "default", map[string]string{"key": "val"})
+	newObj := configMapObj("my-cm", "default", map[string]string{})
+	req := makeUpdateRequest("", "configmaps", "default", "my-cm", old, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when no workloads exist: %v", resp.Result)
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_DeniedWhenSecretKeyReferenced verifies that
+// removing a Secret key still referenced by a Deployment's secretKeyRef is denied.
+func TestHandle_DataKeySafetyCheck_DeniedWhenSecretKeyReferenced(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "MY_SECRET",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+											Key:                  "password",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	secretGuard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-secret-keys", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "secrets",
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-key-removal-while-in-use",
+					Type:    ewv1alpha1.RuleTypeDataKeySafetyCheck,
+					Message: "Secret key is still in use",
+					DataKeySafetyCheck: &ewv1alpha1.DataKeySafetyCheck{
+						Resources: []ewv1alpha1.DataKeyReferenceResource{
+							{
+								APIGroup: "apps",
+								Resource: "deployments",
+								Version:  "v1",
+								KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+									{
+										RefPath: "spec.template.spec.containers.env.valueFrom.secretKeyRef",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(secretGuard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSecret := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]interface{}{"name": "my-secret", "namespace": "default"},
+		"data":       map[string]interface{}{"password": "c2VjcmV0"},
+	}
+	newSecret := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]interface{}{"name": "my-secret", "namespace": "default"},
+		"data":       map[string]interface{}{},
+	}
+	req := makeUpdateRequest("", "secrets", "default", "my-secret", oldSecret, newSecret)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because a Deployment references the removed Secret key via secretKeyRef")
+	}
+}
+
+// TestKeyReferenceExistsAtPath_SimpleMatch verifies that the function finds a
+// matching name+key pair at a simple dot path.
+func TestKeyReferenceExistsAtPath_SimpleMatch(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"ref": map[string]interface{}{
+				"name": "my-cm",
+				"key":  "my-key",
+			},
+		},
+	}
+	if !keyReferenceExistsAtPath(obj, []string{"spec", "ref"}, "my-cm", "my-key", "name", "key") {
+		t.Error("expected match to be found at simple path")
+	}
+}
+
+// TestKeyReferenceExistsAtPath_NoMatch verifies no match when values differ.
+func TestKeyReferenceExistsAtPath_NoMatch(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"ref": map[string]interface{}{
+				"name": "my-cm",
+				"key":  "other-key",
+			},
+		},
+	}
+	if keyReferenceExistsAtPath(obj, []string{"spec", "ref"}, "my-cm", "my-key", "name", "key") {
+		t.Error("expected no match when key field differs")
+	}
+}
+
+// TestKeyReferenceExistsAtPath_TraversesArrays verifies that arrays along the
+// path are traversed automatically.
+func TestKeyReferenceExistsAtPath_TraversesArrays(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"env": []interface{}{
+						map[string]interface{}{
+							"valueFrom": map[string]interface{}{
+								"configMapKeyRef": map[string]interface{}{
+									"name": "my-cm",
+									"key":  "db-host",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	parts := []string{"spec", "containers", "env", "valueFrom", "configMapKeyRef"}
+	if !keyReferenceExistsAtPath(obj, parts, "my-cm", "db-host", "name", "key") {
+		t.Error("expected match via nested array traversal")
+	}
+}
+
+// TestDataKeysFromRaw_DataField verifies that keys from the "data" field are
+// returned.
+func TestDataKeysFromRaw_DataField(t *testing.T) {
+	cm := configMapObj("cm", "default", map[string]string{"key1": "v1", "key2": "v2"})
+	raw, _ := json.Marshal(cm)
+
+	keys, err := dataKeysFromRaw(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, k := range []string{"key1", "key2"} {
+		if _, ok := keys[k]; !ok {
+			t.Errorf("expected key %q to be present", k)
+		}
+	}
+}
+
+// TestDataKeysFromRaw_BinaryDataField verifies that keys from the "binaryData"
+// field are returned.
+func TestDataKeysFromRaw_BinaryDataField(t *testing.T) {
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]interface{}{"name": "s", "namespace": "default"},
+		"binaryData": map[string]interface{}{"bin-key": "aGVsbG8="},
+	}
+	raw, _ := json.Marshal(obj)
+
+	keys, err := dataKeysFromRaw(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := keys["bin-key"]; !ok {
+		t.Error("expected bin-key from binaryData to be present")
+	}
+}
+
+// TestDataKeysFromRaw_EmptyData verifies that an empty data map returns an
+// empty key set without error.
+func TestDataKeysFromRaw_EmptyData(t *testing.T) {
+	cm := configMapObj("cm", "default", map[string]string{})
+	raw, _ := json.Marshal(cm)
+
+	keys, err := dataKeysFromRaw(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected empty key set, got %v", keys)
+	}
+}
