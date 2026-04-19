@@ -1,25 +1,49 @@
 #!/usr/bin/env bash
 # demo.sh — Interactive EarlyWatch demo scenarios.
 #
-# This script walks through two concrete examples of EarlyWatch protecting
-# Kubernetes resources from unsafe deletions.
+# This script installs the watchctl CLI and EarlyWatch onto the cluster, then
+# walks through two concrete examples of EarlyWatch protecting Kubernetes
+# resources from unsafe deletions.
 #
-# Run scripts/demo-setup.sh first to create the kind cluster and install
-# EarlyWatch, then run this script to walk through the demo scenarios.
+# Run scripts/demo-setup.sh first to create the kind cluster, then run this
+# script to install EarlyWatch and walk through the demo scenarios.
 # To tear everything down afterwards, run scripts/demo-teardown.sh.
 #
-# Usage:
-#   bash scripts/demo.sh [--skip-cleanup]
+# Prerequisites (all must be on your PATH):
+#   • kubectl — https://kubernetes.io/docs/tasks/tools/
+#   • curl    — pre-installed on most systems  (not needed with --build or
+#               --skip-watchctl-install)
+#   • go      — https://go.dev/doc/install  (only required with --build)
 #
-#   --skip-cleanup  Skip automatic teardown when the script exits.
-#                   Run scripts/demo-teardown.sh manually to clean up later.
+# Usage:
+#   bash scripts/demo.sh [--skip-cleanup] [--skip-watchctl-install] [--build]
+#                        [--image-pull-secret=<path>]
+#
+#   --skip-cleanup           Skip automatic teardown when the script exits.
+#                            Run scripts/demo-teardown.sh manually to clean up later.
+#   --skip-watchctl-install  Skip downloading / building the watchctl binary.
+#                            Use this when watchctl is already present at the
+#                            repo root (e.g. after a previous run).
+#   --build                  Build watchctl from source instead of downloading it.
+#                            Requires go on your PATH.
+#   --image-pull-secret=<path>
+#                            Path to a Docker config JSON file (e.g. ~/.docker/config.json)
+#                            used to pull images from a private registry. The script creates
+#                            a Kubernetes Secret named "pullSecret" in the early-watch-system
+#                            namespace from this file (optional).
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLEANUP=false
+SKIP_WATCHCTL_INSTALL=false
+BUILD_WATCHCTL=false
+IMAGE_PULL_SECRET=""
 for arg in "$@"; do
   case "$arg" in
-    --skip-cleanup) SKIP_CLEANUP=true ;;
+    --skip-cleanup)          SKIP_CLEANUP=true ;;
+    --skip-watchctl-install) SKIP_WATCHCTL_INSTALL=true ;;
+    --build)                 BUILD_WATCHCTL=true ;;
+    --image-pull-secret=*)   IMAGE_PULL_SECRET="${arg#--image-pull-secret=}" ;;
   esac
 done
 
@@ -39,18 +63,154 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── Verify setup has been run ────────────────────────────────────────────────
-if ! kubectl get namespace early-watch-system &>/dev/null; then
-  echo "${RED}Error: EarlyWatch does not appear to be installed.${RESET}"
-  echo "Run ${BOLD}scripts/demo-setup.sh${RESET} first, then re-run this script."
+# ── Verify cluster is reachable ──────────────────────────────────────────────
+if ! kubectl cluster-info &>/dev/null; then
+  echo "${RED}Error: cannot reach a Kubernetes cluster.${RESET}"
+  echo "Run ${BOLD}scripts/demo-setup.sh${RESET} first to create a kind cluster."
   exit 1
 fi
 
-if [ ! -x "$WATCHCTL" ]; then
-  echo "${RED}Error: watchctl binary not found at $WATCHCTL${RESET}"
-  echo "Run ${BOLD}scripts/demo-setup.sh${RESET} first to build it."
-  exit 1
+# ── Step 1: Install watchctl ─────────────────────────────────────────────────
+if [ "$SKIP_WATCHCTL_INSTALL" = "true" ]; then
+  print_info "Skipping watchctl install (--skip-watchctl-install was set)."
+  if [ ! -x "$WATCHCTL" ]; then
+    echo "${RED}Error: watchctl binary not found at $WATCHCTL${RESET}"
+    echo "Remove --skip-watchctl-install so the script can download it automatically."
+    exit 1
+  fi
+  print_success "watchctl found at $WATCHCTL"
+elif [ "$BUILD_WATCHCTL" = "true" ]; then
+  print_header "Step 1 — Build the watchctl CLI"
+  print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
+  print_info "uninstall EarlyWatch on any cluster in a single command."
+  print_info ""
+  print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
+  pause
+
+  run_cmd "$REPO_ROOT/scripts/build.sh" "$REPO_ROOT/watchctl"
+
+  print_success "watchctl built successfully at $WATCHCTL"
+  pause
+else
+  print_header "Step 1 — Download the watchctl CLI"
+  print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
+  print_info "uninstall EarlyWatch on any cluster in a single command."
+  print_info ""
+  print_info "We will download the latest pre-built binary from GitHub Releases."
+  print_info "Pass --build to compile from source instead, or --skip-watchctl-install"
+  print_info "if watchctl is already present."
+  print_info ""
+  print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
+  pause
+
+  print_info "Fetching the latest release tag from GitHub..."
+  LATEST_TAG=$(curl -sSfL "https://api.github.com/repos/brendandburns/early-watch/releases" \
+    | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+
+  if [ -z "${LATEST_TAG}" ]; then
+    print_error "Could not determine the latest release tag."
+    print_info  "The GitHub API may be rate-limited, unreachable, or have no published releases."
+    print_info  "Tip: run with --build to compile watchctl from source instead."
+    exit 1
+  fi
+
+  print_info "Latest release: ${LATEST_TAG}"
+
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ARCH="$(uname -m)"
+  case "${ARCH}" in
+    x86_64)          ARCH="amd64" ;;
+    aarch64|arm64)   ARCH="arm64" ;;
+  esac
+
+  # Asset naming convention matches the release workflow:
+  # watchctl-<tag>-<os>-<arch>  (e.g. watchctl-v0.1.0-linux-amd64)
+  BINARY_NAME="watchctl-${LATEST_TAG}-${OS}-${ARCH}"
+  DOWNLOAD_URL="https://github.com/brendandburns/early-watch/releases/download/${LATEST_TAG}/${BINARY_NAME}"
+
+  print_info "Downloading ${BINARY_NAME}..."
+  if ! curl -sSfL "${DOWNLOAD_URL}" -o "${WATCHCTL}"; then
+    print_error "Failed to download watchctl from: ${DOWNLOAD_URL}"
+    print_info  "The asset may not exist for your platform (${OS}/${ARCH}) or release (${LATEST_TAG})."
+    print_info  "Tip: run with --build to compile watchctl from source instead."
+    exit 1
+  fi
+  run_cmd chmod +x "${WATCHCTL}"
+
+  print_success "watchctl ${LATEST_TAG} downloaded successfully at $WATCHCTL"
+  pause
 fi
+
+# ── Step 2: Install EarlyWatch ───────────────────────────────────────────────
+print_header "Step 2 — Install EarlyWatch onto the Cluster"
+print_info "watchctl install applies the following resources in one go:"
+print_info "  • ChangeValidator CRD  — defines the custom resource type"
+print_info "  • RBAC (ClusterRole + ClusterRoleBinding + ServiceAccount)"
+print_info "  • Webhook Deployment   — the admission controller pod"
+print_info "  • Webhook Service      — exposes the controller inside the cluster"
+print_info "  • ValidatingWebhookConfiguration — registers with the API server"
+print_info ""
+print_info "The install is idempotent; running it twice is safe."
+print_info ""
+print_info "Expected outcome: all EarlyWatch components are Running in the"
+print_info "'early-watch-system' namespace."
+pause
+
+INSTALL_ARGS=("--kubeconfig" "$HOME/.kube/config")
+if [ -n "$IMAGE_PULL_SECRET" ]; then
+  if [ ! -f "$IMAGE_PULL_SECRET" ]; then
+    print_error "Docker config file not found: $IMAGE_PULL_SECRET"
+    exit 1
+  fi
+  print_info "Ensuring namespace 'early-watch-system' exists..."
+  run_cmd "kubectl create namespace early-watch-system --dry-run=client -o yaml | kubectl apply -f -"
+  print_info "Creating image pull secret 'pullSecret' in early-watch-system..."
+  run_cmd "kubectl create secret generic pullSecret \
+    --from-file=.dockerconfigjson=\"$IMAGE_PULL_SECRET\" \
+    --type=kubernetes.io/dockerconfigjson \
+    --namespace=early-watch-system \
+    --dry-run=client -o yaml \
+    | kubectl apply -f -"
+  INSTALL_ARGS+=("--image-pull-secret" "pullSecret")
+fi
+run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
+
+echo ""
+print_info "Waiting for the webhook deployment to become ready (up to 120s)..."
+run_cmd kubectl rollout status deployment/early-watch-webhook \
+  -n early-watch-system --timeout=120s
+
+print_success "EarlyWatch is installed and ready."
+pause
+
+# ── Step 3: Inspect installed resources ─────────────────────────────────────
+print_header "Step 3 — Inspect the Installed Resources"
+print_info "Let's take a look at what was created."
+print_info ""
+print_info "You should see:"
+print_info "  • The 'early-watch-system' namespace"
+print_info "  • The webhook pod in a Running state"
+print_info "  • The 'changevalidators.earlywatch.io' CRD"
+print_info "  • The ValidatingWebhookConfiguration that hooks into the API server"
+pause
+
+echo ""
+echo "${BOLD}Namespace:${RESET}"
+run_cmd kubectl get namespace early-watch-system
+
+echo ""
+echo "${BOLD}Pods in early-watch-system:${RESET}"
+run_cmd kubectl get pods -n early-watch-system
+
+echo ""
+echo "${BOLD}ChangeValidator CRD:${RESET}"
+run_cmd kubectl get crd changevalidators.earlywatch.io
+
+echo ""
+echo "${BOLD}ValidatingWebhookConfiguration:${RESET}"
+run_cmd kubectl get validatingwebhookconfiguration early-watch-validating-webhook
+
+pause
 
 # ── Welcome banner ───────────────────────────────────────────────────────────
 clear
@@ -332,6 +492,14 @@ pause
 print_header "Demo Complete!"
 echo ""
 echo "You have seen EarlyWatch:"
+if [ "$SKIP_WATCHCTL_INSTALL" = "false" ]; then
+  if [ "$BUILD_WATCHCTL" = "true" ]; then
+    echo "  ${GREEN}✔${RESET}  watchctl built from source"
+  else
+    echo "  ${GREEN}✔${RESET}  watchctl downloaded from latest release"
+  fi
+fi
+echo "  ${GREEN}✔${RESET}  EarlyWatch installed onto the cluster"
 echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
 echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
 echo "  ${GREEN}✔${RESET}  Allowing deletions once their dependencies are cleaned up"
