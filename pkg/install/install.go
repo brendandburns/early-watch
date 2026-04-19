@@ -74,6 +74,11 @@ type Options struct {
 	// ValidatingWebhookConfiguration. The CLI may default this to true, but
 	// library callers using Options{} must set it explicitly.
 	APIServerCertSigning bool
+	// ImagePullSecret is the name of an existing Kubernetes Secret of type
+	// kubernetes.io/dockerconfigjson that is added as an imagePullSecret to
+	// every Deployment managed by the install. Leave empty when the cluster
+	// can pull images without authentication.
+	ImagePullSecret string
 }
 
 // Run applies all EarlyWatch infrastructure manifests to the cluster
@@ -121,16 +126,17 @@ func Run(opts Options) error {
 		defaultNamespace:    opts.Namespace,
 	}
 
-	// When using API-server cert signing, strip the cert-manager annotation
-	// from the ValidatingWebhookConfiguration so cert-manager (if not
-	// installed) does not leave the caBundle unpopulated.
-	var manifestMutator func(*unstructured.Unstructured)
-	if opts.APIServerCertSigning {
-		manifestMutator = func(obj *unstructured.Unstructured) {
-			stampManagedBy(obj)
-			if obj.GetKind() == "ValidatingWebhookConfiguration" {
-				removeCertManagerAnnotation(obj)
-			}
+	// Build the manifest mutator. It always stamps the managed-by annotation,
+	// optionally strips the cert-manager annotation from the
+	// ValidatingWebhookConfiguration, and optionally injects an
+	// imagePullSecret into every Deployment.
+	manifestMutator := func(obj *unstructured.Unstructured) {
+		stampManagedBy(obj)
+		if opts.APIServerCertSigning && obj.GetKind() == "ValidatingWebhookConfiguration" {
+			removeCertManagerAnnotation(obj)
+		}
+		if opts.ImagePullSecret != "" && obj.GetKind() == "Deployment" {
+			injectImagePullSecret(obj, opts.ImagePullSecret)
 		}
 	}
 
@@ -144,7 +150,13 @@ func Run(opts Options) error {
 			defaultAuditMonitorImage: opts.AuditMonitorImage,
 			defaultNamespace:         opts.Namespace,
 		}
-		if err := applyManifestDir(ctx, dynClient, mapper, "manifests/manual-touch", mtReplacements, nil); err != nil {
+		mtMutator := func(obj *unstructured.Unstructured) {
+			stampManagedBy(obj)
+			if opts.ImagePullSecret != "" && obj.GetKind() == "Deployment" {
+				injectImagePullSecret(obj, opts.ImagePullSecret)
+			}
+		}
+		if err := applyManifestDir(ctx, dynClient, mapper, "manifests/manual-touch", mtReplacements, mtMutator); err != nil {
 			return err
 		}
 	}
@@ -257,4 +269,25 @@ func injectAnnotation(obj *unstructured.Unstructured, key, value string) {
 	}
 	annotations[key] = value
 	obj.SetAnnotations(annotations)
+}
+
+// injectImagePullSecret adds secretName to the imagePullSecrets list of the
+// pod template in obj (which must be a Deployment). If the secret is already
+// present the list is left unchanged.
+func injectImagePullSecret(obj *unstructured.Unstructured, secretName string) {
+	existing, _, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "imagePullSecrets")
+	if err != nil {
+		existing = nil
+	}
+	for _, entry := range existing {
+		if m, ok := entry.(map[string]interface{}); ok {
+			if m["name"] == secretName {
+				return
+			}
+		}
+	}
+	existing = append(existing, map[string]interface{}{"name": secretName})
+	if err := unstructured.SetNestedSlice(obj.Object, existing, "spec", "template", "spec", "imagePullSecrets"); err != nil {
+		fmt.Printf("warning: could not set imagePullSecrets on %s %q: %v\n", obj.GetKind(), obj.GetName(), err)
+	}
 }

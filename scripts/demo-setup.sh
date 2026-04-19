@@ -19,19 +19,23 @@
 #   • go      — https://go.dev/doc/install  (only required with --build)
 #
 # Usage:
-#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build]
+#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build] [--image-pull-secret=<name>]
 #
-#   --skip-cluster-create  Reuse an existing kind cluster named "earlywatch-demo"
-#   --build                Build watchctl from source instead of downloading it
+#   --skip-cluster-create        Reuse an existing kind cluster named "earlywatch-demo"
+#   --build                      Build watchctl from source instead of downloading it
+#   --image-pull-secret=<name>   Name of an existing Kubernetes Secret for pulling images
+#                                from a private registry (optional)
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLUSTER_CREATE=false
 BUILD_WATCHCTL=false
+IMAGE_PULL_SECRET=""
 for arg in "$@"; do
   case "$arg" in
     --skip-cluster-create) SKIP_CLUSTER_CREATE=true ;;
     --build)               BUILD_WATCHCTL=true ;;
+    --image-pull-secret=*) IMAGE_PULL_SECRET="${arg#--image-pull-secret=}" ;;
   esac
 done
 
@@ -201,7 +205,11 @@ print_info "Expected outcome: all EarlyWatch components are Running in the"
 print_info "'early-watch-system' namespace."
 pause
 
-run_cmd "$WATCHCTL" install --kubeconfig "$HOME/.kube/config"
+INSTALL_ARGS=("--kubeconfig" "$HOME/.kube/config")
+if [ -n "$IMAGE_PULL_SECRET" ]; then
+  INSTALL_ARGS+=("--image-pull-secret" "$IMAGE_PULL_SECRET")
+fi
+run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
 
 echo ""
 print_info "Waiting for the webhook deployment to become ready (up to 120s)..."
