@@ -23,7 +23,7 @@
 #                               already installed on the cluster (e.g. after a previous run).
 #   --image-pull-secret=<path>  Path to a Docker config JSON file (e.g. ~/.docker/config.json)
 #                               used to pull images from a private registry. The script creates
-#                               a Kubernetes Secret named "pullSecret" in the early-watch-system
+#                               a Kubernetes Secret named "pullsecret" in the early-watch-system
 #                               namespace from this file (optional).
 set -euo pipefail
 
@@ -102,14 +102,14 @@ else
     fi
     print_info "Ensuring namespace 'early-watch-system' exists..."
     run_cmd "kubectl create namespace early-watch-system --dry-run=client -o yaml | kubectl apply -f -"
-    print_info "Creating image pull secret 'pullSecret' in early-watch-system..."
-    run_cmd "kubectl create secret generic pullSecret \
+    print_info "Creating image pull secret 'pullsecret' in early-watch-system..."
+    run_cmd "kubectl create secret generic pullsecret \
     --from-file=.dockerconfigjson=\"$IMAGE_PULL_SECRET\" \
     --type=kubernetes.io/dockerconfigjson \
     --namespace=early-watch-system \
     --dry-run=client -o yaml \
     | kubectl apply -f -"
-    INSTALL_ARGS+=("--image-pull-secret" "pullSecret")
+    INSTALL_ARGS+=("--image-pull-secret" "pullsecret")
   fi
   run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
 
