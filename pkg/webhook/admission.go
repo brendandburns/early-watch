@@ -704,7 +704,7 @@ func parseRSAPublicKey(pemData string) (*rsa.PublicKey, error) {
 // evaluateServicePodSelectorCheck denies an UPDATE to a Service when the
 // service previously selected at least one Pod but would select no Pods after
 // the change.  The check is a no-op for non-UPDATE requests and for headless
-// services (spec.clusterIP == "None") that carry no selector.
+// services (spec.clusterIP == "None").
 func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
 	ctx context.Context,
 	message string,
@@ -726,14 +726,15 @@ func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
 		return false, "", fmt.Errorf("parsing old service object: %w", err)
 	}
 
-	// Headless services without a selector are exempt from this check.
-	if oldClusterIP == "None" && len(oldSelector) == 0 {
+	// If the old service had no selector (nil) it could not have matched any
+	// Pods, so there is nothing to protect.  Note: an empty map ({}) is a
+	// valid selector that matches all Pods and is handled below.
+	if oldSelector == nil {
 		return false, "", nil
 	}
 
-	// If the old service had no selector it could not have matched any Pods,
-	// so there is nothing to protect.
-	if len(oldSelector) == 0 {
+	// Headless services are exempt from this check.
+	if oldClusterIP == "None" {
 		return false, "", nil
 	}
 
@@ -758,8 +759,10 @@ func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
 		return false, "", fmt.Errorf("parsing new service object: %w", err)
 	}
 
-	// No selector on the new service means no Pods will be selected.
-	if len(newSelector) == 0 {
+	// Absent selector (nil) on the new service means no Pods will be selected.
+	// An empty map ({}) is a valid selector that matches all Pods, so it is
+	// not treated as absent.
+	if newSelector == nil {
 		return true, renderMessage(message, req), nil
 	}
 

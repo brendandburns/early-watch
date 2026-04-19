@@ -2063,6 +2063,94 @@ func TestServicePodSelectorCheck_HeadlessNoSelector_Allowed(t *testing.T) {
 	}
 }
 
+// TestServicePodSelectorCheck_HeadlessWithSelector_Allowed verifies that a
+// headless service (clusterIP=None) with a selector and matching pods is still
+// exempt from this check.
+func TestServicePodSelectorCheck_HeadlessWithSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// Headless service with a selector that matches a pod; change would drop pods.
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "None")
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "None")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected headless service (clusterIP=None) to be exempt even when selector change would drop pods")
+	}
+}
+
+// TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied
+// verifies that a service with spec.selector: {} (matches all pods) is denied
+// when the new selector would match no pods.
+func TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// spec.selector: {} matches all pods (including my-pod above).
+	oldSvc := serviceObj(map[string]string{}, "")
+	// New selector has no matching pods.
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected change to be denied: old empty-selector matched all pods but new selector matches none")
+	}
+}
+
+// TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed verifies
+// that changing to spec.selector: {} (matches all pods) is allowed when pods exist.
+func TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// Old service selected a specific app.
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	// New service uses spec.selector: {} which matches all pods.
+	newSvc := serviceObj(map[string]string{}, "")
+	req := makeUpdateRequest("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected change to be allowed: new empty-selector {} matches all pods")
+	}
+}
+
 // TestServicePodSelectorCheck_OldNoPods_Allowed verifies that when the old
 // service had a selector but no matching pods, the change is allowed.
 func TestServicePodSelectorCheck_OldNoPods_Allowed(t *testing.T) {
