@@ -5,7 +5,7 @@
 # demo starts:
 #   • Checks that required tools are present
 #   • Creates a kind cluster named "earlywatch-demo"
-#   • Builds the watchctl CLI from source
+#   • Downloads the watchctl CLI from the latest GitHub release (or builds it)
 #   • Installs EarlyWatch onto the cluster
 #   • Inspects the installed resources so you can confirm everything is healthy
 #
@@ -14,20 +14,24 @@
 # Prerequisites (all must be on your PATH):
 #   • kind    — https://kind.sigs.k8s.io/docs/user/quick-start/#installation
 #   • kubectl — https://kubernetes.io/docs/tasks/tools/
-#   • go      — https://go.dev/doc/install  (see go.mod for the required version)
+#   • curl    — pre-installed on most systems
 #   • docker  — https://docs.docker.com/get-docker/
+#   • go      — https://go.dev/doc/install  (only required with --build)
 #
 # Usage:
-#   bash scripts/demo-setup.sh [--skip-cluster-create]
+#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build]
 #
 #   --skip-cluster-create  Reuse an existing kind cluster named "earlywatch-demo"
+#   --build                Build watchctl from source instead of downloading it
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLUSTER_CREATE=false
+BUILD_WATCHCTL=false
 for arg in "$@"; do
   case "$arg" in
     --skip-cluster-create) SKIP_CLUSTER_CREATE=true ;;
+    --build)               BUILD_WATCHCTL=true ;;
   esac
 done
 
@@ -43,7 +47,11 @@ echo "This script prepares a local kind cluster with EarlyWatch installed."
 echo "It covers:"
 echo "  1. Prerequisite check"
 echo "  2. kind cluster creation"
-echo "  3. Building the watchctl CLI"
+if [ "$BUILD_WATCHCTL" = "true" ]; then
+  echo "  3. Building the watchctl CLI from source"
+else
+  echo "  3. Downloading the watchctl CLI from the latest GitHub release"
+fi
 echo "  4. Installing EarlyWatch onto the cluster"
 echo "  5. Inspecting the installed resources"
 echo ""
@@ -54,11 +62,22 @@ pause
 
 # ── Step 0: Prerequisite check ───────────────────────────────────────────────
 print_header "Step 0 — Checking Prerequisites"
-print_info "We need kind, kubectl, go, and docker to be installed and accessible."
+if [ "$BUILD_WATCHCTL" = "true" ]; then
+  print_info "We need kind, kubectl, go, and docker to be installed and accessible."
+else
+  print_info "We need kind, kubectl, curl, and docker to be installed and accessible."
+fi
 pause
 
 MISSING=()
-for tool in kind kubectl go docker; do
+REQUIRED_TOOLS=(kind kubectl docker)
+if [ "$BUILD_WATCHCTL" = "true" ]; then
+  REQUIRED_TOOLS+=(go)
+else
+  REQUIRED_TOOLS+=(curl)
+fi
+
+for tool in "${REQUIRED_TOOLS[@]}"; do
   if command -v "$tool" &>/dev/null; then
     print_success "$tool found at $(command -v "$tool")"
   else
@@ -106,17 +125,65 @@ print_info "Current cluster nodes:"
 run_cmd kubectl get nodes
 pause
 
-# ── Step 2: Build watchctl ───────────────────────────────────────────────────
-print_header "Step 2 — Build the watchctl CLI"
-print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
-print_info "uninstall EarlyWatch on any cluster in a single command."
-print_info ""
-print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
-pause
+# ── Step 2: Install watchctl ─────────────────────────────────────────────────
+if [ "$BUILD_WATCHCTL" = "true" ]; then
+  print_header "Step 2 — Build the watchctl CLI"
+  print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
+  print_info "uninstall EarlyWatch on any cluster in a single command."
+  print_info ""
+  print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
+  pause
 
-run_cmd "$REPO_ROOT/scripts/build.sh" "$REPO_ROOT/watchctl"
+  run_cmd "$REPO_ROOT/scripts/build.sh" "$REPO_ROOT/watchctl"
 
-print_success "watchctl built successfully at $WATCHCTL"
+  print_success "watchctl built successfully at $WATCHCTL"
+else
+  print_header "Step 2 — Download the watchctl CLI"
+  print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
+  print_info "uninstall EarlyWatch on any cluster in a single command."
+  print_info ""
+  print_info "We will download the latest pre-built binary from GitHub Releases."
+  print_info "Pass --build to compile from source instead."
+  print_info ""
+  print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
+  pause
+
+  print_info "Fetching the latest release tag from GitHub..."
+  LATEST_TAG=$(curl -sSfL "https://api.github.com/repos/brendandburns/early-watch/releases" \
+    | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+
+  if [ -z "${LATEST_TAG}" ]; then
+    print_error "Could not determine the latest release tag."
+    print_info  "The GitHub API may be rate-limited, unreachable, or have no published releases."
+    print_info  "Tip: run with --build to compile watchctl from source instead."
+    exit 1
+  fi
+
+  print_info "Latest release: ${LATEST_TAG}"
+
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ARCH="$(uname -m)"
+  case "${ARCH}" in
+    x86_64)          ARCH="amd64" ;;
+    aarch64|arm64)   ARCH="arm64" ;;
+  esac
+
+  # Asset naming convention matches the release workflow:
+  # watchctl-<tag>-<os>-<arch>  (e.g. watchctl-v0.1.0-linux-amd64)
+  BINARY_NAME="watchctl-${LATEST_TAG}-${OS}-${ARCH}"
+  DOWNLOAD_URL="https://github.com/brendandburns/early-watch/releases/download/${LATEST_TAG}/${BINARY_NAME}"
+
+  print_info "Downloading ${BINARY_NAME}..."
+  if ! curl -sSfL "${DOWNLOAD_URL}" -o "${WATCHCTL}"; then
+    print_error "Failed to download watchctl from: ${DOWNLOAD_URL}"
+    print_info  "The asset may not exist for your platform (${OS}/${ARCH}) or release (${LATEST_TAG})."
+    print_info  "Tip: run with --build to compile watchctl from source instead."
+    exit 1
+  fi
+  run_cmd chmod +x "${WATCHCTL}"
+
+  print_success "watchctl ${LATEST_TAG} downloaded successfully at $WATCHCTL"
+fi
 pause
 
 # ── Step 3: Install EarlyWatch ───────────────────────────────────────────────
@@ -180,7 +247,11 @@ echo "Your kind cluster '${CLUSTER_NAME}' has EarlyWatch installed and running."
 echo ""
 echo "  ${GREEN}✔${RESET}  Prerequisites verified"
 echo "  ${GREEN}✔${RESET}  kind cluster '${CLUSTER_NAME}' created"
-echo "  ${GREEN}✔${RESET}  watchctl built from source"
+if [ "$BUILD_WATCHCTL" = "true" ]; then
+  echo "  ${GREEN}✔${RESET}  watchctl built from source"
+else
+  echo "  ${GREEN}✔${RESET}  watchctl downloaded from latest release"
+fi
 echo "  ${GREEN}✔${RESET}  EarlyWatch installed and webhook ready"
 echo ""
 echo "Next step — run the interactive demo:"
