@@ -55,6 +55,14 @@ if [ -z "$DEMOS_ARG" ]; then
   DEMOS=("${ALL_DEMOS[@]}")
 else
   IFS=',' read -ra DEMOS <<< "$DEMOS_ARG"
+  # Validate that every requested demo number is a positive integer that
+  # corresponds to a known demo (1..${#ALL_DEMOS[@]}).
+  for d in "${DEMOS[@]}"; do
+    if ! [[ "$d" =~ ^[1-9][0-9]*$ ]] || [ "$d" -gt "${#ALL_DEMOS[@]}" ]; then
+      echo "${RED}Error: invalid demo number '${d}'. Valid values are: ${ALL_DEMOS[*]}${RESET}"
+      exit 1
+    fi
+  done
 fi
 
 # Helper: returns 0 if demo number $1 is in the DEMOS array.
@@ -204,7 +212,7 @@ _demo_selected 1 && echo "  1. A Service blocked from deletion because matching 
 _demo_selected 2 && echo "  2. A ConfigMap blocked from deletion because a Deployment references it"
 echo "  • Each deletion successfully completing once dependencies are removed"
 echo ""
-echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)${RESET}"
+echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)  (≈1 min per demo + 1 min for install/uninstall)${RESET}"
 pause
 
 # ── Run selected demos ────────────────────────────────────────────────────────
