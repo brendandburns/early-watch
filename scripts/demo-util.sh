@@ -67,7 +67,7 @@ print_error() {
 }
 
 print_cmd() {
-  echo "${BOLD}   \$ $1${RESET}"
+  echo "${BOLD}   \$ $1${RESET}" >&2
 }
 
 pause() {
@@ -78,5 +78,5 @@ pause() {
 
 run_cmd() {
   print_cmd "$*"
-  "$@"
+  bash -c "$*"
 }

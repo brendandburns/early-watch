@@ -214,15 +214,14 @@ if [ -n "$IMAGE_PULL_SECRET" ]; then
     exit 1
   fi
   print_info "Ensuring namespace 'early-watch-system' exists..."
-  run_cmd kubectl create namespace early-watch-system --dry-run=client -o yaml \
-    | kubectl apply -f -
+  run_cmd "kubectl create namespace early-watch-system --dry-run=client -o yaml | kubectl apply -f -"
   print_info "Creating image pull secret 'pullSecret' in early-watch-system..."
-  run_cmd kubectl create secret generic pullSecret \
-    --from-file=.dockerconfigjson="$IMAGE_PULL_SECRET" \
+  run_cmd "kubectl create secret generic pullSecret \
+    --from-file=.dockerconfigjson=\"$IMAGE_PULL_SECRET\" \
     --type=kubernetes.io/dockerconfigjson \
     --namespace=early-watch-system \
     --dry-run=client -o yaml \
-    | kubectl apply -f -
+    | kubectl apply -f -"
   INSTALL_ARGS+=("--image-pull-secret" "pullSecret")
 fi
 run_cmd "$WATCHCTL" install "${INSTALL_ARGS[@]}"
