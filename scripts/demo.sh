@@ -2,8 +2,12 @@
 # demo.sh — Interactive EarlyWatch demo scenarios.
 #
 # This script optionally installs EarlyWatch onto the cluster (Steps 1 and 2),
-# then walks through two concrete examples of EarlyWatch protecting Kubernetes
-# resources from unsafe deletions.
+# then walks through concrete examples of EarlyWatch protecting Kubernetes
+# resources from unsafe deletions.  Each demo scenario lives in its own script
+# under scripts/:
+#
+#   demo-1-service.sh   — Protect a Service while matching Pods are running
+#   demo-2-configmap.sh — Protect a ConfigMap referenced by a Deployment
 #
 # Run scripts/demo-setup.sh first to create the kind cluster and download
 # watchctl, then run this script.
@@ -15,6 +19,7 @@
 # Usage:
 #   bash scripts/demo.sh [--skip-cleanup] [--skip-earlywatch-install]
 #                        [--image-pull-secret=<path>]
+#                        [--demos=<comma-separated list>]
 #
 #   --skip-cleanup              Skip automatic teardown when the script exits.
 #                               Run scripts/demo-teardown.sh manually to clean up later.
@@ -25,19 +30,41 @@
 #                               used to pull images from a private registry. The script creates
 #                               a Kubernetes Secret named "pullsecret" in the early-watch-system
 #                               namespace from this file (optional).
+#   --demos=<list>              Comma-separated list of demo numbers to run (default: all).
+#                               Examples: --demos=1   --demos=2   --demos=1,2
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLEANUP=false
 SKIP_EARLYWATCH_INSTALL=false
 IMAGE_PULL_SECRET=""
+DEMOS_ARG=""
 for arg in "$@"; do
   case "$arg" in
     --skip-cleanup)             SKIP_CLEANUP=true ;;
     --skip-earlywatch-install)  SKIP_EARLYWATCH_INSTALL=true ;;
     --image-pull-secret=*)      IMAGE_PULL_SECRET="${arg#--image-pull-secret=}" ;;
+    --demos=*)                  DEMOS_ARG="${arg#--demos=}" ;;
   esac
 done
+
+# Build the set of demos to run.  Default: all demos.
+ALL_DEMOS=(1 2)
+DEMOS=()
+if [ -z "$DEMOS_ARG" ]; then
+  DEMOS=("${ALL_DEMOS[@]}")
+else
+  IFS=',' read -ra DEMOS <<< "$DEMOS_ARG"
+fi
+
+# Helper: returns 0 if demo number $1 is in the DEMOS array.
+_demo_selected() {
+  local n="$1"
+  for d in "${DEMOS[@]}"; do
+    if [ "$d" = "$n" ]; then return 0; fi
+  done
+  return 1
+}
 
 # ── Shared utilities ─────────────────────────────────────────────────────────
 # shellcheck source=scripts/demo-util.sh
@@ -173,233 +200,25 @@ echo "change-safety rules — it prevents you from accidentally breaking"
 echo "your cluster by deleting resources that are still in use."
 echo ""
 echo "During this demo you will see:"
-echo "  1. A Service blocked from deletion because matching Pods are running"
-echo "  2. A ConfigMap blocked from deletion because a Deployment references it"
-echo "  3. Both deletions successfully completing once dependencies are removed"
+_demo_selected 1 && echo "  1. A Service blocked from deletion because matching Pods are running"
+_demo_selected 2 && echo "  2. A ConfigMap blocked from deletion because a Deployment references it"
+echo "  • Each deletion successfully completing once dependencies are removed"
 echo ""
-echo "${DIM}Estimated run time: ~3 minutes${RESET}"
+echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)${RESET}"
 pause
 
-# ── Demo 1 — Protect a Service ───────────────────────────────────────────────
-print_header "Demo 1 — Protect a Service from Deletion"
-print_info "Scenario: you have a Service and Pods that it routes traffic to."
-print_info "EarlyWatch should prevent you from deleting the Service while"
-print_info "the Pods are still running, so traffic is never silently dropped."
-print_info ""
-print_info "We will:"
-print_info "  a) Create a Service named 'demo-service' and a matching Pod"
-print_info "  b) Apply the 'protect-service-from-deletion' ChangeValidator"
-print_info "  c) Try to delete the Service — expect a DENIAL from EarlyWatch"
-print_info "  d) Delete the Pod first, then retry — the deletion succeeds"
-pause
+# ── Run selected demos ────────────────────────────────────────────────────────
+SCRIPTS_DIR="$(dirname "${BASH_SOURCE[0]}")"
 
-# 1a — Create Service and Pod
-print_step "1a — Creating Service 'demo-service' and a matching Pod..."
-print_info "The Service selects Pods with the label 'app=demo'. We will"
-print_info "create one such Pod so the Service has active traffic targets."
-pause
-
-run_cmd kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: Service
-metadata:
-  name: demo-service
-  namespace: default
-spec:
-  selector:
-    app: demo
-  ports:
-    - port: 80
-      targetPort: 8080
-EOF
-
-run_cmd kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: demo-pod
-  namespace: default
-  labels:
-    app: demo
-spec:
-  containers:
-    - name: pause
-      image: registry.k8s.io/pause:3.9
-EOF
-
-print_info "Waiting for the demo-pod to be Running..."
-run_cmd kubectl wait --for=condition=ready pod/demo-pod --timeout=60s
-
-echo ""
-print_success "Service and Pod are ready."
-run_cmd kubectl get service demo-service
-run_cmd kubectl get pod demo-pod -o wide
-
-pause
-
-# 1b — Apply ChangeValidator
-print_step "1b — Applying the 'protect-service-from-deletion' ChangeValidator..."
-print_info "This ChangeValidator tells EarlyWatch: 'Deny any DELETE on a Service"
-print_info "in the default namespace if Pods matching its spec.selector exist.'"
-pause
-
-run_cmd kubectl apply -f "$REPO_ROOT/config/samples/protect_service.yaml"
-
-echo ""
-print_success "ChangeValidator applied."
-run_cmd kubectl get changevalidator protect-service-from-deletion -n default
-
-pause
-
-# 1c — Try deleting the Service (should fail)
-print_step "1c — Attempting to delete 'demo-service' (this should be DENIED)..."
-print_info "EarlyWatch will intercept the DELETE request and check whether any"
-print_info "Pods with matching labels exist. Because 'demo-pod' is running with"
-print_info "'app=demo', the deletion will be denied with a clear error message."
-print_info ""
-print_info "Watch for: 'admission webhook ... denied the request:'"
-pause
-
-print_cmd "kubectl delete service demo-service"
-if kubectl delete service demo-service 2>&1; then
-  print_error "Unexpected: the deletion was NOT denied. Check that EarlyWatch is running."
-else
-  print_success "Deletion was correctly DENIED by EarlyWatch."
+if _demo_selected 1; then
+  # shellcheck source=scripts/demo-1-service.sh
+  source "$SCRIPTS_DIR/demo-1-service.sh"
 fi
 
-pause
-
-# 1d — Delete the Pod, then retry
-print_step "1d — Deleting 'demo-pod' first, then retrying the Service deletion..."
-print_info "Once the matching Pod is gone there is nothing left to protect."
-print_info "EarlyWatch will re-evaluate the rules and this time allow the deletion."
-print_info ""
-print_info "Expected outcome: the Service deletion succeeds."
-pause
-
-run_cmd kubectl delete pod demo-pod --wait=true
-
-echo ""
-print_info "Pod removed. Retrying Service deletion..."
-print_cmd "kubectl delete service demo-service"
-if kubectl delete service demo-service 2>&1; then
-  print_success "Service deleted successfully — EarlyWatch allowed it."
-else
-  print_error "Deletion still denied. The Pod may not be fully terminated yet."
-  print_info  "Try again in a few seconds: kubectl delete service demo-service"
+if _demo_selected 2; then
+  # shellcheck source=scripts/demo-2-configmap.sh
+  source "$SCRIPTS_DIR/demo-2-configmap.sh"
 fi
-
-pause
-
-# ── Demo 2 — Protect a ConfigMap ────────────────────────────────────────────
-print_header "Demo 2 — Protect a ConfigMap Referenced by a Deployment"
-print_info "Scenario: you have a ConfigMap that is mounted as environment"
-print_info "variables into a Deployment. Deleting that ConfigMap would cause"
-print_info "new Pods to fail to start. EarlyWatch prevents this."
-print_info ""
-print_info "We will:"
-print_info "  a) Create a ConfigMap 'demo-config' and a Deployment that uses it"
-print_info "  b) Apply the 'protect-configmap-from-deletion' ChangeValidator"
-print_info "  c) Try to delete the ConfigMap — expect a DENIAL"
-print_info "  d) Delete the Deployment first, then retry — the deletion succeeds"
-pause
-
-# 2a — Create ConfigMap and Deployment
-print_step "2a — Creating ConfigMap 'demo-config' and a Deployment that references it..."
-pause
-
-run_cmd kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: demo-config
-  namespace: default
-data:
-  MESSAGE: "Hello from EarlyWatch demo"
-EOF
-
-run_cmd kubectl apply -f - <<'EOF'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: demo-app
-  namespace: default
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: demo-app
-  template:
-    metadata:
-      labels:
-        app: demo-app
-    spec:
-      containers:
-        - name: pause
-          image: registry.k8s.io/pause:3.9
-          envFrom:
-            - configMapRef:
-                name: demo-config
-EOF
-
-echo ""
-print_success "ConfigMap and Deployment created."
-run_cmd kubectl get configmap demo-config
-run_cmd kubectl get deployment demo-app
-
-pause
-
-# 2b — Apply ChangeValidator
-print_step "2b — Applying the 'protect-configmap-from-deletion' ChangeValidator..."
-print_info "This rule checks whether any Deployment, DaemonSet, or CronJob in the"
-print_info "same namespace references the ConfigMap being deleted."
-pause
-
-run_cmd kubectl apply -f "$REPO_ROOT/config/samples/protect_configmap_from_deletion.yaml"
-
-echo ""
-print_success "ChangeValidator applied."
-run_cmd kubectl get changevalidator protect-configmap-from-deletion -n default
-
-pause
-
-# 2c — Try deleting the ConfigMap (should fail)
-print_step "2c — Attempting to delete 'demo-config' (this should be DENIED)..."
-print_info "EarlyWatch scans all Deployments, DaemonSets, and CronJobs in the"
-print_info "'default' namespace for references to 'demo-config'. It finds"
-print_info "'demo-app' using it via envFrom, so the deletion is denied."
-print_info ""
-print_info "Watch for: 'admission webhook ... denied the request:'"
-pause
-
-print_cmd "kubectl delete configmap demo-config"
-if kubectl delete configmap demo-config 2>&1; then
-  print_error "Unexpected: the deletion was NOT denied. Check that EarlyWatch is running."
-else
-  print_success "Deletion was correctly DENIED by EarlyWatch."
-fi
-
-pause
-
-# 2d — Delete Deployment, then retry
-print_step "2d — Deleting 'demo-app' Deployment, then retrying the ConfigMap deletion..."
-print_info "Once the Deployment is gone there are no more references to 'demo-config'."
-print_info ""
-print_info "Expected outcome: the ConfigMap deletion succeeds."
-pause
-
-run_cmd kubectl delete deployment demo-app --wait=true
-
-echo ""
-print_info "Deployment removed. Retrying ConfigMap deletion..."
-print_cmd "kubectl delete configmap demo-config"
-if kubectl delete configmap demo-config 2>&1; then
-  print_success "ConfigMap deleted successfully — EarlyWatch allowed it."
-else
-  print_error "Deletion still denied. Try again: kubectl delete configmap demo-config"
-fi
-
-pause
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
 print_header "Uninstall EarlyWatch"
@@ -436,8 +255,8 @@ echo "You have seen EarlyWatch:"
 if [ "$SKIP_EARLYWATCH_INSTALL" = "false" ]; then
   echo "  ${GREEN}✔${RESET}  EarlyWatch installed onto the cluster"
 fi
-echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
-echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
+_demo_selected 1 && echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
+_demo_selected 2 && echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
 echo "  ${GREEN}✔${RESET}  Allowing deletions once their dependencies are cleaned up"
 echo "  ${GREEN}✔${RESET}  Cleanly uninstalled from the cluster"
 echo ""
