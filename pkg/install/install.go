@@ -46,8 +46,9 @@ const auditMonitorImagePlaceholder = "early-watch-audit-monitor:IMAGE_TAG"
 var defaultWebhookImage = "early-watch:" + Version
 
 // defaultAuditMonitorImage is the container image used by the audit-monitor
-// Deployment when no override is provided. It is derived from Version.
-var defaultAuditMonitorImage = "early-watch-audit-monitor:" + Version
+// Deployment when no override is provided. It is derived from Version and
+// matches the published registry path used by the CLI and documentation.
+var defaultAuditMonitorImage = "ghcr.io/brendandburns/early-watch/audit-monitor:" + Version
 
 // defaultNamespace is the Kubernetes namespace used for EarlyWatch resources
 // when no override is provided via Options.Namespace.
