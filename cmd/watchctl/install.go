@@ -30,11 +30,15 @@ another external CA) to manage the webhook certificate instead.
 Pass --manual-touch to additionally install the audit-monitor CRDs, RBAC,
 Deployment, and Service required for manual touch monitoring.
 
+Pass --image-pull-secret to specify the name of an existing Kubernetes Secret
+that provides credentials for pulling images from a private registry.
+
 Example:
 
   watchctl install --kubeconfig ~/.kube/config
   watchctl install --kubeconfig ~/.kube/config --manual-touch
-  watchctl install --kubeconfig ~/.kube/config --no-api-server-cert-signing`,
+  watchctl install --kubeconfig ~/.kube/config --no-api-server-cert-signing
+  watchctl install --kubeconfig ~/.kube/config --image-pull-secret my-registry-secret`,
 	RunE: runInstall,
 }
 
@@ -45,6 +49,7 @@ var installFlags struct {
 	manualTouch            bool
 	auditMonitorImage      string
 	noAPIServerCertSigning bool
+	imagePullSecret        string
 }
 
 func init() {
@@ -55,6 +60,7 @@ func init() {
 	f.BoolVar(&installFlags.manualTouch, "manual-touch", false, "Also install the audit-monitor components for manual touch monitoring.")
 	f.StringVar(&installFlags.auditMonitorImage, "audit-monitor-image", defaultAuditMonitorImageForVersion(), "Container image for the audit-monitor Deployment. Only used with --manual-touch.")
 	f.BoolVar(&installFlags.noAPIServerCertSigning, "no-api-server-cert-signing", false, "Disable automatic TLS certificate provisioning via self-signed CA. Use this when cert-manager or another external CA manages the webhook certificate.")
+	f.StringVar(&installFlags.imagePullSecret, "image-pull-secret", "", "Name of an existing Kubernetes Secret used to pull images from a private registry. Added as imagePullSecrets to every managed Deployment.")
 }
 
 // defaultWebhookImageForVersion returns the default container image for the
@@ -77,6 +83,7 @@ func runInstall(_ *cobra.Command, _ []string) error {
 		ManualTouchInstall:   installFlags.manualTouch,
 		AuditMonitorImage:    installFlags.auditMonitorImage,
 		APIServerCertSigning: !installFlags.noAPIServerCertSigning,
+		ImagePullSecret:      installFlags.imagePullSecret,
 	}
 
 	if err := ewinstall.Run(opts); err != nil {
