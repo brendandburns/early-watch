@@ -46,10 +46,10 @@ watchctl install --manual-touch --audit-monitor-image ghcr.io/my-org/early-watch
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--kubeconfig` | `""` | Path to the kubeconfig file. Defaults to in-cluster config when empty. |
-| `--image` | `early-watch:latest` | Container image for the webhook Deployment. |
+| `--image` | `ghcr.io/brendandburns/early-watch/webhook:v0.0.1` | Container image for the webhook Deployment. |
 | `--namespace` | `early-watch-system` | Kubernetes namespace to install EarlyWatch into. |
 | `--manual-touch` | `false` | Also install the audit-monitor components for manual touch monitoring. |
-| `--audit-monitor-image` | `early-watch-audit-monitor:latest` | Container image for the audit-monitor Deployment. Only used with `--manual-touch`. |
+| `--audit-monitor-image` | `ghcr.io/brendandburns/early-watch/audit-monitor:v0.0.1` | Container image for the audit-monitor Deployment. Only used with `--manual-touch`. |
 
 ---
 

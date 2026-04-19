@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT="${1:-${REPO_ROOT}/watchctl}"
 
 VERSION="$(git -C "${REPO_ROOT}" describe --tags --abbrev=0 2>/dev/null || echo "latest")"
-LDFLAGS="-X github.com/brendandburns/early-watch/cmd/watchctl.Version=${VERSION}"
+LDFLAGS="-X github.com/brendandburns/early-watch/cmd/watchctl.Version=${VERSION} -X github.com/brendandburns/early-watch/pkg/install.Version=${VERSION}"
 
 echo "Building watchctl ${VERSION} → ${OUTPUT}"
 go build -ldflags "${LDFLAGS}" -o "${OUTPUT}" "${REPO_ROOT}/cmd/watchctl/"
