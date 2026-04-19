@@ -77,6 +77,28 @@ if ! command -v magick &>/dev/null && ! command -v convert &>/dev/null; then
   print_install_hints
   exit 1
 fi
+
+# ── Capture current terminal settings ────────────────────────────────────────
+# Save the current terminal size so we can restore it on exit.
+_ORIG_ROWS=0
+_ORIG_COLS=0
+if command -v stty &>/dev/null && stty size &>/dev/null 2>&1; then
+  read -r _ORIG_ROWS _ORIG_COLS < <(stty size)
+fi
+
+# Install a trap to restore the terminal to its original state on exit,
+# whether the script finishes normally or is interrupted.
+_restore_terminal() {
+  # Reset foreground and background colors to the terminal defaults.
+  printf '\033]110\007'   # reset foreground to default
+  printf '\033]111\007'   # reset background to default
+  # Restore the original terminal window size if we captured it successfully.
+  if [[ "${_ORIG_ROWS}" -gt 0 && "${_ORIG_COLS}" -gt 0 ]]; then
+    printf '\033[8;%d;%dt' "${_ORIG_ROWS}" "${_ORIG_COLS}"
+  fi
+}
+trap _restore_terminal EXIT
+
 # ── Dark-mode console ─────────────────────────────────────────────────────────
 # Use xterm-compatible OSC escape sequences to switch the terminal to a dark
 # color scheme before recording begins.  These sequences are supported by most
