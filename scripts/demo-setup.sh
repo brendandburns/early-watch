@@ -18,26 +18,20 @@
 #   • go      — https://go.dev/doc/install  (only required with --build)
 #
 # Usage:
-#   bash scripts/demo-setup.sh [--skip-cluster-create] [--skip-watchctl-install]
-#                              [--build]
+#   bash scripts/demo-setup.sh [--skip-cluster-create] [--build]
 #
-#   --skip-cluster-create        Reuse an existing kind cluster named "earlywatch-demo"
-#   --skip-watchctl-install      Skip downloading / building the watchctl binary.
-#                                Use this when watchctl is already present at the
-#                                repo root (e.g. after a previous run).
-#   --build                      Build watchctl from source instead of downloading it.
-#                                Requires go on your PATH.
+#   --skip-cluster-create  Reuse an existing kind cluster named "earlywatch-demo"
+#   --build                Build watchctl from source instead of downloading it.
+#                          Requires go on your PATH.
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLUSTER_CREATE=false
-SKIP_WATCHCTL_INSTALL=false
 BUILD_WATCHCTL=false
 for arg in "$@"; do
   case "$arg" in
-    --skip-cluster-create)   SKIP_CLUSTER_CREATE=true ;;
-    --skip-watchctl-install) SKIP_WATCHCTL_INSTALL=true ;;
-    --build)                 BUILD_WATCHCTL=true ;;
+    --skip-cluster-create) SKIP_CLUSTER_CREATE=true ;;
+    --build)               BUILD_WATCHCTL=true ;;
   esac
 done
 
@@ -53,9 +47,7 @@ echo "This script prepares a local kind cluster for EarlyWatch."
 echo "It covers:"
 echo "  1. Prerequisite check"
 echo "  2. kind cluster creation"
-if [ "$SKIP_WATCHCTL_INSTALL" = "true" ]; then
-  echo "  3. Skipping watchctl install (--skip-watchctl-install was set)"
-elif [ "$BUILD_WATCHCTL" = "true" ]; then
+if [ "$BUILD_WATCHCTL" = "true" ]; then
   echo "  3. Building the watchctl CLI from source"
 else
   echo "  3. Downloading the watchctl CLI from the latest GitHub release"
@@ -69,9 +61,7 @@ pause
 
 # ── Step 0: Prerequisite check ───────────────────────────────────────────────
 print_header "Step 0 — Checking Prerequisites"
-if [ "$SKIP_WATCHCTL_INSTALL" = "true" ]; then
-  print_info "We need kind, kubectl, and docker to be installed and accessible."
-elif [ "$BUILD_WATCHCTL" = "true" ]; then
+if [ "$BUILD_WATCHCTL" = "true" ]; then
   print_info "We need kind, kubectl, go, and docker to be installed and accessible."
 else
   print_info "We need kind, kubectl, curl, and docker to be installed and accessible."
@@ -80,12 +70,10 @@ pause
 
 MISSING=()
 REQUIRED_TOOLS=(kind kubectl docker)
-if [ "$SKIP_WATCHCTL_INSTALL" = "false" ]; then
-  if [ "$BUILD_WATCHCTL" = "true" ]; then
-    REQUIRED_TOOLS+=(go)
-  else
-    REQUIRED_TOOLS+=(curl)
-  fi
+if [ "$BUILD_WATCHCTL" = "true" ]; then
+  REQUIRED_TOOLS+=(go)
+else
+  REQUIRED_TOOLS+=(curl)
 fi
 
 for tool in "${REQUIRED_TOOLS[@]}"; do
@@ -137,17 +125,7 @@ run_cmd kubectl get nodes
 pause
 
 # ── Step 2: Install watchctl ─────────────────────────────────────────────────
-if [ "$SKIP_WATCHCTL_INSTALL" = "true" ]; then
-  print_header "Step 2 — watchctl Install Skipped"
-  print_info "Skipping watchctl install (--skip-watchctl-install was set)."
-  if [ ! -x "$WATCHCTL" ]; then
-    print_error "watchctl binary not found at $WATCHCTL"
-    print_info  "Remove --skip-watchctl-install so the script can download it automatically."
-    exit 1
-  fi
-  print_success "watchctl found at $WATCHCTL"
-  pause
-elif [ "$BUILD_WATCHCTL" = "true" ]; then
+if [ "$BUILD_WATCHCTL" = "true" ]; then
   print_header "Step 2 — Build the watchctl CLI"
   print_info "watchctl is EarlyWatch's companion CLI tool. It can install and"
   print_info "uninstall EarlyWatch on any cluster in a single command."
@@ -165,8 +143,7 @@ else
   print_info "uninstall EarlyWatch on any cluster in a single command."
   print_info ""
   print_info "We will download the latest pre-built binary from GitHub Releases."
-  print_info "Pass --build to compile from source instead, or --skip-watchctl-install"
-  print_info "if watchctl is already present."
+  print_info "Pass --build to compile from source instead."
   print_info ""
   print_info "Expected outcome: a 'watchctl' binary appears in the repo root."
   pause
@@ -216,9 +193,7 @@ echo "Your kind cluster '${CLUSTER_NAME}' is up and running with watchctl ready.
 echo ""
 echo "  ${GREEN}✔${RESET}  Prerequisites verified"
 echo "  ${GREEN}✔${RESET}  kind cluster '${CLUSTER_NAME}' created"
-if [ "$SKIP_WATCHCTL_INSTALL" = "true" ]; then
-  echo "  ${GREEN}✔${RESET}  watchctl found (install skipped)"
-elif [ "$BUILD_WATCHCTL" = "true" ]; then
+if [ "$BUILD_WATCHCTL" = "true" ]; then
   echo "  ${GREEN}✔${RESET}  watchctl built from source"
 else
   echo "  ${GREEN}✔${RESET}  watchctl downloaded from latest release"
