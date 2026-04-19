@@ -70,12 +70,12 @@ spec:
 EOF
 
 print_info "Waiting for the demo-pod to be Running..."
-run_cmd kubectl wait --for=condition=ready pod/demo-pod --timeout=60s
+run_cmd kubectl wait --for=condition=ready pod/demo-pod -n "$DEMO_NS" --timeout=60s
 
 echo ""
 print_success "Service and Pod are ready."
-run_cmd kubectl get service demo-service
-run_cmd kubectl get pod demo-pod -o wide
+run_cmd kubectl get service demo-service -n "$DEMO_NS"
+run_cmd kubectl get pod demo-pod -o wide -n "$DEMO_NS"
 
 pause
 
@@ -89,7 +89,7 @@ run_cmd kubectl apply -f "$REPO_ROOT/config/samples/protect_service.yaml"
 
 echo ""
 print_success "ChangeValidator applied."
-run_cmd kubectl get changevalidator protect-service-from-deletion -n default
+run_cmd kubectl get changevalidator protect-service-from-deletion -n "$DEMO_NS"
 
 pause
 
@@ -102,8 +102,8 @@ print_info ""
 print_info "Watch for: 'admission webhook ... denied the request:'"
 pause
 
-print_cmd "kubectl delete service demo-service"
-if kubectl delete service demo-service 2>&1; then
+print_cmd "kubectl delete service demo-service -n $DEMO_NS"
+if kubectl delete service demo-service -n "$DEMO_NS" 2>&1; then
   print_error "Unexpected: the deletion was NOT denied. Check that EarlyWatch is running."
 else
   print_success "Deletion was correctly DENIED by EarlyWatch."
@@ -119,16 +119,16 @@ print_info ""
 print_info "Expected outcome: the Service deletion succeeds."
 pause
 
-run_cmd kubectl delete pod demo-pod --wait=true
+run_cmd kubectl delete pod demo-pod -n "$DEMO_NS" --wait=true
 
 echo ""
 print_info "Pod removed. Retrying Service deletion..."
-print_cmd "kubectl delete service demo-service"
-if kubectl delete service demo-service 2>&1; then
+print_cmd "kubectl delete service demo-service -n $DEMO_NS"
+if kubectl delete service demo-service -n "$DEMO_NS" 2>&1; then
   print_success "Service deleted successfully — EarlyWatch allowed it."
 else
   print_error "Deletion still denied. The Pod may not be fully terminated yet."
-  print_info  "Try again in a few seconds: kubectl delete service demo-service"
+  print_info  "Try again in a few seconds: kubectl delete service demo-service -n $DEMO_NS"
 fi
 
 pause

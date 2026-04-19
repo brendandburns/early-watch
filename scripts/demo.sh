@@ -34,6 +34,10 @@
 #                               Examples: --demos=service   --demos=configmap   --demos=service,configmap
 set -euo pipefail
 
+# ── Shared utilities ─────────────────────────────────────────────────────────
+# shellcheck source=scripts/demo-util.sh
+source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
+
 # ── Flags ────────────────────────────────────────────────────────────────────
 SKIP_CLEANUP=false
 SKIP_EARLYWATCH_INSTALL=false
@@ -76,10 +80,6 @@ _demo_selected() {
   done
   return 1
 }
-
-# ── Shared utilities ─────────────────────────────────────────────────────────
-# shellcheck source=scripts/demo-util.sh
-source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
 # ── Cleanup on exit ──────────────────────────────────────────────────────────
 cleanup() {

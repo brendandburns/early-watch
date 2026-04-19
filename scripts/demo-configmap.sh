@@ -75,8 +75,8 @@ EOF
 
 echo ""
 print_success "ConfigMap and Deployment created."
-run_cmd kubectl get configmap demo-config
-run_cmd kubectl get deployment demo-app
+run_cmd kubectl get configmap demo-config -n "$DEMO_NS"
+run_cmd kubectl get deployment demo-app -n "$DEMO_NS"
 
 pause
 
@@ -90,7 +90,7 @@ run_cmd kubectl apply -f "$REPO_ROOT/config/samples/protect_configmap_from_delet
 
 echo ""
 print_success "ChangeValidator applied."
-run_cmd kubectl get changevalidator protect-configmap-from-deletion -n default
+run_cmd kubectl get changevalidator protect-configmap-from-deletion -n "$DEMO_NS"
 
 pause
 
@@ -103,8 +103,8 @@ print_info ""
 print_info "Watch for: 'admission webhook ... denied the request:'"
 pause
 
-print_cmd "kubectl delete configmap demo-config"
-if kubectl delete configmap demo-config 2>&1; then
+print_cmd "kubectl delete configmap demo-config -n $DEMO_NS"
+if kubectl delete configmap demo-config -n "$DEMO_NS" 2>&1; then
   print_error "Unexpected: the deletion was NOT denied. Check that EarlyWatch is running."
 else
   print_success "Deletion was correctly DENIED by EarlyWatch."
@@ -119,15 +119,15 @@ print_info ""
 print_info "Expected outcome: the ConfigMap deletion succeeds."
 pause
 
-run_cmd kubectl delete deployment demo-app --wait=true
+run_cmd kubectl delete deployment demo-app -n "$DEMO_NS" --wait=true
 
 echo ""
 print_info "Deployment removed. Retrying ConfigMap deletion..."
-print_cmd "kubectl delete configmap demo-config"
-if kubectl delete configmap demo-config 2>&1; then
+print_cmd "kubectl delete configmap demo-config -n $DEMO_NS"
+if kubectl delete configmap demo-config -n "$DEMO_NS" 2>&1; then
   print_success "ConfigMap deleted successfully — EarlyWatch allowed it."
 else
-  print_error "Deletion still denied. Try again: kubectl delete configmap demo-config"
+  print_error "Deletion still denied. Try again: kubectl delete configmap demo-config -n $DEMO_NS"
 fi
 
 pause
