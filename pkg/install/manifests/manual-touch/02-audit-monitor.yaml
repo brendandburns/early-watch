@@ -26,7 +26,7 @@ spec:
       serviceAccountName: early-watch-audit-monitor
       containers:
         - name: audit-monitor
-          image: early-watch-audit-monitor:v0.0.1
+          image: early-watch-audit-monitor:IMAGE_TAG
           imagePullPolicy: IfNotPresent
           args:
             - --listen-address=:8090
