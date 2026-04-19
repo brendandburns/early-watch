@@ -2,6 +2,14 @@
 # install-hooks.sh — install git hooks and golangci-lint for local development.
 set -euo pipefail
 
+# ── Exit trap — keep terminal open ────────────────────────────────────────────
+_on_exit() {
+  echo ""
+  echo -n "   Press Enter to close..."
+  read -r _
+}
+trap '_on_exit' EXIT
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GOLANGCI_LINT_VERSION="v2.11.4"
 

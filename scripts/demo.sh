@@ -43,17 +43,24 @@ done
 # shellcheck source=scripts/demo-util.sh
 source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
-# ── Cleanup on exit ──────────────────────────────────────────────────────────
+# ── Cleanup / keep-terminal-open on exit ────────────────────────────────────
 cleanup() {
   if [ "$SKIP_CLEANUP" = "true" ]; then
     echo ""
     print_info "Skipping cleanup (--skip-cleanup was set)."
     print_info "Run 'bash scripts/demo-teardown.sh' to clean up when you are done."
-    return
+  else
+    bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
   fi
-  bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
 }
-trap cleanup EXIT
+
+_on_exit() {
+  cleanup
+  echo ""
+  echo -n "${DIM}   Press Enter to close...${RESET}"
+  read -r _
+}
+trap '_on_exit' EXIT
 
 # ── Verify cluster and watchctl are available ────────────────────────────────
 if ! kubectl cluster-info &>/dev/null; then

@@ -26,6 +26,14 @@ done
 # shellcheck source=scripts/demo-util.sh
 source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
+# ── Exit trap — keep terminal open ────────────────────────────────────────────
+_on_exit() {
+  echo ""
+  echo -n "${DIM}   Press Enter to close...${RESET}"
+  read -r _
+}
+trap '_on_exit' EXIT
+
 # ── Demo resource cleanup ────────────────────────────────────────────────────
 print_header "Teardown — Removing Demo Resources"
 
