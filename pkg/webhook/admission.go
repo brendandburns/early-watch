@@ -789,6 +789,7 @@ func (h *AdmissionHandler) serviceHasMatchingPods(
 	}
 	result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: sel.String(),
+		Limit:         1,
 	})
 	if err != nil {
 		return false, fmt.Errorf("listing Pods: %w", err)
