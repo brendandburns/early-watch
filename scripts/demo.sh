@@ -94,7 +94,7 @@ else
   print_info "'early-watch-system' namespace."
   pause
 
-  INSTALL_ARGS=("--kubeconfig" "$HOME/.kube/config")
+  INSTALL_ARGS=()
   if [ -n "$IMAGE_PULL_SECRET" ]; then
     if [ ! -f "$IMAGE_PULL_SECRET" ]; then
       print_error "Docker config file not found: $IMAGE_PULL_SECRET"
