@@ -82,7 +82,7 @@ fi
 # Save the current terminal size so we can restore it on exit.
 _ORIG_ROWS=0
 _ORIG_COLS=0
-if command -v stty &>/dev/null && stty size &>/dev/null 2>&1; then
+if stty size &>/dev/null 2>&1; then
   read -r _ORIG_ROWS _ORIG_COLS < <(stty size)
 fi
 
