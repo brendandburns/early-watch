@@ -8,15 +8,9 @@
 #                            (e.g. misspell, whitespace, unconvert)
 set -euo pipefail
 
-# ── Exit trap — keep terminal open ────────────────────────────────────────────
-_on_exit() {
-  echo ""
-  echo -n "   Press Enter to close..."
-  read -r _
-}
-trap '_on_exit' EXIT
+# shellcheck source=scripts/demo-util.sh
+source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 echo "==> gofmt -s (format + simplify)..."

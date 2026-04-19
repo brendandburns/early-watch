@@ -23,6 +23,13 @@
 #     print_cmd    <text>   — print a command line (for display only)
 #     pause                 — wait for the user to press Enter
 #     run_cmd      <cmd…>   — print and then execute a command
+#
+#   EXIT trap (_on_exit):
+#     Keeps the terminal window open on both success and failure so the user
+#     can review all output before the shell closes.  On a non-zero exit it
+#     also prints an error message with the exit code.
+#     If the sourcing script defines a _pre_exit_cleanup() function it is
+#     called before the prompt (demo.sh uses this to run demo-teardown.sh).
 
 # ── ANSI color codes ─────────────────────────────────────────────────────────
 BOLD=$'\033[1m'
@@ -88,3 +95,22 @@ run_cmd() {
   printf "%s\n" "${RESET}"
   bash -c "$*"
 }
+
+# ── EXIT trap — keep terminal open ───────────────────────────────────────────
+# Keeps the terminal open on both success and failure so the user can review
+# all output before the shell closes.
+# If the sourcing script defines _pre_exit_cleanup(), it is called first
+# (demo.sh uses this to invoke demo-teardown.sh before the prompt fires).
+_on_exit() {
+  local rc=$?
+  if declare -f _pre_exit_cleanup > /dev/null 2>&1; then
+    _pre_exit_cleanup
+  fi
+  if [ "$rc" -ne 0 ]; then
+    print_error "Script failed (exit code ${rc}). Review the output above."
+  fi
+  echo ""
+  echo -n "${DIM}   Press Enter to close...${RESET}"
+  read -r _
+}
+trap '_on_exit' EXIT

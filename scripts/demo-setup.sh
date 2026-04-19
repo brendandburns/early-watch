@@ -39,16 +39,6 @@ done
 # shellcheck source=scripts/demo-util.sh
 source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
-# ── Exit trap — keep terminal open ────────────────────────────────────────────
-# Keeps the terminal window open on both success and failure so the user can
-# review all output before the shell closes.
-_on_exit() {
-  echo ""
-  echo -n "${DIM}   Press Enter to close...${RESET}"
-  read -r _
-}
-trap '_on_exit' EXIT
-
 # ── Header ───────────────────────────────────────────────────────────────────
 clear
 echo "${BOLD}EarlyWatch Demo — Setup${RESET}"

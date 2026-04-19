@@ -10,14 +10,6 @@
 # is used so that the binary remains functional on untagged development trees.
 set -euo pipefail
 
-# ── Exit trap — keep terminal open ────────────────────────────────────────────
-_on_exit() {
-  echo ""
-  echo -n "   Press Enter to close..."
-  read -r _
-}
-trap '_on_exit' EXIT
-
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT="${1:-${REPO_ROOT}/watchctl}"
 
