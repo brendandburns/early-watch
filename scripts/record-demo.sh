@@ -103,7 +103,7 @@ t-rec \
   --fps 15 \
   --output "${OUTPUT_NAME}" \
   --quiet \
-  bash "${SCRIPT_DIR}/demo.sh" "${DEMO_ARGS[@]+"${DEMO_ARGS[@]}"}"
+  bash "${SCRIPT_DIR}/demo.sh" "${DEMO_ARGS[@]}"
 
 echo ""
 echo "Recording saved: ${OUTPUT_NAME}.gif"
