@@ -41,9 +41,9 @@ const webhookImagePlaceholder = "early-watch:IMAGE_TAG"
 const auditMonitorImagePlaceholder = "early-watch-audit-monitor:IMAGE_TAG"
 
 // defaultWebhookImage is the container image used by the webhook Deployment
-// when no override is provided. It is derived from Version so that the version
-// is defined in a single place.
-var defaultWebhookImage = "early-watch:" + Version
+// when no override is provided. It is derived from Version and matches the
+// published registry path used by the CLI and documentation.
+var defaultWebhookImage = "ghcr.io/brendandburns/early-watch/webhook:" + Version
 
 // defaultAuditMonitorImage is the container image used by the audit-monitor
 // Deployment when no override is provided. It is derived from Version and
