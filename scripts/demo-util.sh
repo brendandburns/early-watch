@@ -77,6 +77,14 @@ pause() {
 }
 
 run_cmd() {
-  print_cmd "$*"
+  # Simulate typing the command character-by-character with random pauses.
+  local cmd_str="$*"
+  printf "%s   \$ " "${BOLD}"
+  for (( i=0; i<${#cmd_str}; i++ )); do
+    printf "%s" "${cmd_str:$i:1}"
+    # Random delay between 30 ms and 120 ms; zero-pad to 3 decimal places.
+    sleep "$(printf '0.%03d' $(( 30 + RANDOM % 91 )))"
+  done
+  printf "%s\n" "${RESET}"
   bash -c "$*"
 }
