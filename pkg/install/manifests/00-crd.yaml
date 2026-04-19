@@ -357,6 +357,20 @@ spec:
                               that the annotation must have. When omitted, any
                               value is accepted as long as the key is present.
                             type: string
+                      checkLock:
+                        description: >
+                          CheckLock optionally configures the CheckLock rule.
+                          When omitted the rule applies only to DELETE
+                          operations (the default behavior).
+                        type: object
+                        properties:
+                          lockOnMutate:
+                            description: >
+                              LockOnMutate, when true, extends the lock check
+                              to UPDATE operations in addition to DELETE
+                              operations. When false or omitted the check only
+                              applies to DELETE requests.
+                            type: boolean
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.
               type: object

@@ -173,7 +173,7 @@ func (h *AdmissionHandler) evaluateRule(
 		return h.evaluateManualTouchCheck(ctx, *rule.ManualTouchCheck, rule.Message, req)
 
 	case ewv1alpha1.RuleTypeCheckLock:
-		return evaluateCheckLock(rule.Message, req)
+		return evaluateCheckLock(rule.CheckLock, rule.Message, req)
 
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
@@ -389,14 +389,26 @@ func selectorFromField(raw []byte, fieldPath string) (labels.Selector, error) {
 }
 
 // evaluateCheckLock denies a DELETE request when the subject resource carries
-// the earlywatch.io/lock annotation.  For non-DELETE operations the check is
-// always a no-op (returns not-violated).
-func evaluateCheckLock(message string, req admission.Request) (bool, string, error) {
-	if req.Operation != admissionv1.Delete {
+// the earlywatch.io/lock annotation.  When cfg is non-nil and LockOnMutate is
+// true the check is also applied to UPDATE requests.  For all other operations
+// the check is a no-op.
+func evaluateCheckLock(cfg *ewv1alpha1.CheckLockRule, message string, req admission.Request) (bool, string, error) {
+	lockOnMutate := cfg != nil && cfg.LockOnMutate != nil && *cfg.LockOnMutate
+
+	switch req.Operation {
+	case admissionv1.Delete:
+		// continue below
+	case admissionv1.Update:
+		if !lockOnMutate {
+			return false, "", nil
+		}
+		// continue below
+	default:
 		return false, "", nil
 	}
 
 	// For DELETE requests the object being deleted is in OldObject.
+	// For UPDATE requests the pre-update state is also in OldObject.
 	raw := req.OldObject.Raw
 	if len(raw) == 0 {
 		// Fall back to Object in case the webhook is configured to populate it.
