@@ -6,8 +6,8 @@
 # resources from unsafe deletions.  Each demo scenario lives in its own script
 # under scripts/:
 #
-#   demo-1-service.sh   — Protect a Service while matching Pods are running
-#   demo-2-configmap.sh — Protect a ConfigMap referenced by a Deployment
+#   demo-service.sh   — Protect a Service while matching Pods are running
+#   demo-configmap.sh — Protect a ConfigMap referenced by a Deployment
 #
 # Run scripts/demo-setup.sh first to create the kind cluster and download
 # watchctl, then run this script.
@@ -30,8 +30,8 @@
 #                               used to pull images from a private registry. The script creates
 #                               a Kubernetes Secret named "pullsecret" in the early-watch-system
 #                               namespace from this file (optional).
-#   --demos=<list>              Comma-separated list of demo numbers to run (default: all).
-#                               Examples: --demos=1   --demos=2   --demos=1,2
+#   --demos=<list>              Comma-separated list of demo names to run (default: all).
+#                               Examples: --demos=service   --demos=configmap   --demos=service,configmap
 set -euo pipefail
 
 # ── Flags ────────────────────────────────────────────────────────────────────
@@ -49,23 +49,26 @@ for arg in "$@"; do
 done
 
 # Build the set of demos to run.  Default: all demos.
-ALL_DEMOS=(1 2)
+ALL_DEMOS=(service configmap)
 DEMOS=()
 if [ -z "$DEMOS_ARG" ]; then
   DEMOS=("${ALL_DEMOS[@]}")
 else
   IFS=',' read -ra DEMOS <<< "$DEMOS_ARG"
-  # Validate that every requested demo number is a positive integer that
-  # corresponds to a known demo (1..${#ALL_DEMOS[@]}).
+  # Validate that every requested name matches a known demo.
   for d in "${DEMOS[@]}"; do
-    if ! [[ "$d" =~ ^[1-9][0-9]*$ ]] || [ "$d" -gt "${#ALL_DEMOS[@]}" ]; then
-      echo "${RED}Error: invalid demo number '${d}'. Valid values are: ${ALL_DEMOS[*]}${RESET}"
+    valid=false
+    for known in "${ALL_DEMOS[@]}"; do
+      if [ "$d" = "$known" ]; then valid=true; break; fi
+    done
+    if [ "$valid" = "false" ]; then
+      echo "${RED}Error: unknown demo '${d}'. Valid values are: ${ALL_DEMOS[*]}${RESET}"
       exit 1
     fi
   done
 fi
 
-# Helper: returns 0 if demo number $1 is in the DEMOS array.
+# Helper: returns 0 if demo name $1 is in the DEMOS array.
 _demo_selected() {
   local n="$1"
   for d in "${DEMOS[@]}"; do
@@ -208,8 +211,8 @@ echo "change-safety rules — it prevents you from accidentally breaking"
 echo "your cluster by deleting resources that are still in use."
 echo ""
 echo "During this demo you will see:"
-_demo_selected 1 && echo "  1. A Service blocked from deletion because matching Pods are running"
-_demo_selected 2 && echo "  2. A ConfigMap blocked from deletion because a Deployment references it"
+_demo_selected service   && echo "  • A Service blocked from deletion because matching Pods are running"
+_demo_selected configmap && echo "  • A ConfigMap blocked from deletion because a Deployment references it"
 echo "  • Each deletion successfully completing once dependencies are removed"
 echo ""
 echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)  (≈1 min per demo + 1 min for install/uninstall)${RESET}"
@@ -218,14 +221,14 @@ pause
 # ── Run selected demos ────────────────────────────────────────────────────────
 SCRIPTS_DIR="$(dirname "${BASH_SOURCE[0]}")"
 
-if _demo_selected 1; then
-  # shellcheck source=scripts/demo-1-service.sh
-  source "$SCRIPTS_DIR/demo-1-service.sh"
+if _demo_selected service; then
+  # shellcheck source=scripts/demo-service.sh
+  source "$SCRIPTS_DIR/demo-service.sh"
 fi
 
-if _demo_selected 2; then
-  # shellcheck source=scripts/demo-2-configmap.sh
-  source "$SCRIPTS_DIR/demo-2-configmap.sh"
+if _demo_selected configmap; then
+  # shellcheck source=scripts/demo-configmap.sh
+  source "$SCRIPTS_DIR/demo-configmap.sh"
 fi
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
@@ -263,8 +266,8 @@ echo "You have seen EarlyWatch:"
 if [ "$SKIP_EARLYWATCH_INSTALL" = "false" ]; then
   echo "  ${GREEN}✔${RESET}  EarlyWatch installed onto the cluster"
 fi
-_demo_selected 1 && echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
-_demo_selected 2 && echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
+_demo_selected service   && echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
+_demo_selected configmap && echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
 echo "  ${GREEN}✔${RESET}  Allowing deletions once their dependencies are cleaned up"
 echo "  ${GREEN}✔${RESET}  Cleanly uninstalled from the cluster"
 echo ""

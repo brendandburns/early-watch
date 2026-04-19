@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# demo-2-configmap.sh — Demo 2: Protect a ConfigMap referenced by a Deployment.
+# demo-configmap.sh — Protect a ConfigMap referenced by a Deployment.
 #
 # This script demonstrates EarlyWatch blocking the deletion of a ConfigMap
 # that is mounted into a running Deployment, then allowing the deletion once
@@ -10,7 +10,7 @@
 # script from demo.sh which sets up the environment first.
 #
 # Usage (standalone):
-#   bash scripts/demo-2-configmap.sh
+#   bash scripts/demo-configmap.sh
 #
 # Usage (called by demo.sh — preferred):
 #   The variables and functions from demo-util.sh are already in scope.
@@ -22,8 +22,8 @@ if ! declare -f print_header &>/dev/null; then
   source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 fi
 
-# ── Demo 2 — Protect a ConfigMap ────────────────────────────────────────────
-print_header "Demo 2 — Protect a ConfigMap Referenced by a Deployment"
+# ── Demo: Protect a ConfigMap ────────────────────────────────────────────
+print_header "Demo — Protect a ConfigMap Referenced by a Deployment"
 print_info "Scenario: you have a ConfigMap that is mounted as environment"
 print_info "variables into a Deployment. Deleting that ConfigMap would cause"
 print_info "new Pods to fail to start. EarlyWatch prevents this."

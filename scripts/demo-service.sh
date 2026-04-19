@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# demo-1-service.sh — Demo 1: Protect a Service from deletion.
+# demo-service.sh — Protect a Service from deletion.
 #
 # This script demonstrates EarlyWatch blocking the deletion of a Service
 # while matching Pods are still running, then allowing the deletion once
@@ -10,7 +10,7 @@
 # script from demo.sh which sets up the environment first.
 #
 # Usage (standalone):
-#   bash scripts/demo-1-service.sh
+#   bash scripts/demo-service.sh
 #
 # Usage (called by demo.sh — preferred):
 #   The variables and functions from demo-util.sh are already in scope.
@@ -22,8 +22,8 @@ if ! declare -f print_header &>/dev/null; then
   source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 fi
 
-# ── Demo 1 — Protect a Service ───────────────────────────────────────────────
-print_header "Demo 1 — Protect a Service from Deletion"
+# ── Demo: Protect a Service ───────────────────────────────────────────────
+print_header "Demo — Protect a Service from Deletion"
 print_info "Scenario: you have a Service and Pods that it routes traffic to."
 print_info "EarlyWatch should prevent you from deleting the Service while"
 print_info "the Pods are still running, so traffic is never silently dropped."
