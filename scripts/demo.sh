@@ -49,9 +49,9 @@ cleanup() {
     echo ""
     print_info "Skipping cleanup (--skip-cleanup was set)."
     print_info "Run 'bash scripts/demo-teardown.sh' to clean up when you are done."
-  else
-    bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
+    return
   fi
+  bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
 }
 
 _on_exit() {
