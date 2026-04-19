@@ -58,16 +58,25 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ── Prerequisite check ────────────────────────────────────────────────────────
-if ! command -v t-rec &>/dev/null; then
-  echo "Error: t-rec not found in PATH." >&2
+print_install_hints() {
   echo "" >&2
   echo "Install it from https://github.com/sassman/t-rec-rs:" >&2
   echo "  macOS:  brew install t-rec" >&2
   echo "  Linux:  sudo apt-get install imagemagick && cargo install t-rec" >&2
+}
+
+# ── Prerequisite check ────────────────────────────────────────────────────────
+if ! command -v t-rec &>/dev/null; then
+  echo "Error: t-rec not found in PATH." >&2
+  print_install_hints
   exit 1
 fi
 
+if ! command -v magick &>/dev/null && ! command -v convert &>/dev/null; then
+  echo "Error: ImageMagick not found in PATH (expected 'magick' or 'convert')." >&2
+  print_install_hints
+  exit 1
+fi
 # ── Dark-mode console ─────────────────────────────────────────────────────────
 # Use xterm-compatible OSC escape sequences to switch the terminal to a dark
 # color scheme before recording begins.  These sequences are supported by most
