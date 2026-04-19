@@ -67,7 +67,7 @@ print_error() {
 }
 
 print_cmd() {
-  echo "${BOLD}   \$ $1${RESET}"
+  echo "${BOLD}   \$ $1${RESET}" >&2
 }
 
 pause() {
@@ -86,5 +86,5 @@ run_cmd() {
     sleep "$(printf '0.%03d' $(( 30 + RANDOM % 91 )))"
   done
   printf "%s\n" "${RESET}"
-  "$@"
+  bash -c "$*"
 }
