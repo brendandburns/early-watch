@@ -849,7 +849,11 @@ func (h *AdmissionHandler) evaluateDataKeySafetyCheck(
 				if keySubField == "" {
 					keySubField = "key"
 				}
-				parts := strings.Split(ref.RefPath, ".")
+				refPath := strings.TrimSpace(ref.RefPath)
+				if refPath == "" {
+					return false, "", fmt.Errorf("invalid empty refPath for %s", res.Resource)
+				}
+				parts := strings.Split(refPath, ".")
 				for _, removedKey := range removedKeys {
 					if keyReferenceExistsAtPath(item.Object, parts, req.Name, removedKey, nameSubField, keySubField) {
 						return true, renderMessage(message, req), nil
