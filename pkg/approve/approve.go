@@ -173,7 +173,7 @@ func BuildDynamicClient(kubeconfig string) (dynamic.Interface, error) {
 const DefaultChangeApprovalAnnotation = "earlywatch.io/change-approved"
 
 // SignPatch computes the RSA-PSS SHA-256 signature of the given canonical
-// patch JSON bytes.  The patch must already be in its canonical (normalised)
+// patch JSON bytes.  The patch must already be in its canonical (normalized)
 // form so that the signature can be reproduced deterministically.
 func SignPatch(key *rsa.PrivateKey, patchJSON []byte) ([]byte, error) {
 	digest := sha256.Sum256(patchJSON)
