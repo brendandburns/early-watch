@@ -537,10 +537,19 @@ func evaluateDeleteApproval(check ewv1alpha1.ApprovalCheck, message string, pubK
 		annotationKey = defaultApprovalAnnotation
 	}
 
-	// For DELETE requests the object being deleted is in OldObject.
-	raw := req.Object.Raw
-	if len(raw) == 0 {
+	// DELETE requests carry the object being deleted in OldObject. For other
+	// non-UPDATE operations, prefer Object and fall back to OldObject if needed.
+	var raw []byte
+	if req.Operation == admissionv1.Delete {
 		raw = req.OldObject.Raw
+		if len(raw) == 0 {
+			raw = req.Object.Raw
+		}
+	} else {
+		raw = req.Object.Raw
+		if len(raw) == 0 {
+			raw = req.OldObject.Raw
+		}
 	}
 
 	// Extract annotations from the raw object.
