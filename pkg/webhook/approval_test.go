@@ -531,7 +531,7 @@ func TestEvaluateApprovalCheck_Update_OldObjectMissing(t *testing.T) {
 // mustComputePatch is a test helper that calls the internal patch package.
 func mustComputePatch(t *testing.T, oldJSON, newJSON []byte, stripAnnotation string) []byte {
 	t.Helper()
-	// Re-implement the same normalisation logic inline for tests so that
+	// Re-implement the same normalization logic inline for tests so that
 	// test helpers do not import the internal package directly.  This keeps
 	// the test hermetic while still computing the same bytes the webhook uses.
 	stripAnnotations := []string{stripAnnotation}
