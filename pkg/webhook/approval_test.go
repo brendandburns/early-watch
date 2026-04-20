@@ -327,9 +327,9 @@ func signPatchBytes(t *testing.T, key *rsa.PrivateKey, patchJSON []byte) string 
 	return base64.StdEncoding.EncodeToString(sig)
 }
 
-// makeUpdateRequest builds an admission.Request for an UPDATE operation where
+// makeApprovalUpdateRequest builds an admission.Request for an UPDATE operation where
 // oldAnnotations are on OldObject and newAnnotations are on Object.
-func makeUpdateRequest(
+func makeApprovalUpdateRequest(
 	group, version, resource, namespace, name string,
 	oldAnnotations, newAnnotations map[string]string,
 	oldData, newData map[string]interface{},
@@ -370,7 +370,7 @@ func TestEvaluateApprovalCheck_Update_NoAnnotation(t *testing.T) {
 	_, pubPEM := generateTestKeyPair(t)
 	check := ewv1alpha1.ApprovalCheck{PublicKey: pubPEM}
 
-	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
+	req := makeApprovalUpdateRequest("", "v1", "configmaps", "default", "my-cm",
 		nil, nil,
 		map[string]interface{}{"key": "old"},
 		map[string]interface{}{"key": "new"},
@@ -405,7 +405,7 @@ func TestEvaluateApprovalCheck_Update_ValidSignature(t *testing.T) {
 	sig := signPatchBytes(t, privKey, patchJSON)
 
 	// The annotation is on the new (incoming) object, not the old one.
-	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
+	req := makeApprovalUpdateRequest("", "v1", "configmaps", "default", "my-cm",
 		nil,
 		map[string]string{defaultChangeApprovalAnnotation: sig},
 		oldData, newData,
@@ -425,7 +425,7 @@ func TestEvaluateApprovalCheck_Update_InvalidSignature(t *testing.T) {
 	check := ewv1alpha1.ApprovalCheck{PublicKey: pubPEM}
 
 	// Bad signature is on the new (incoming) object.
-	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
+	req := makeApprovalUpdateRequest("", "v1", "configmaps", "default", "my-cm",
 		nil,
 		map[string]string{defaultChangeApprovalAnnotation: base64.StdEncoding.EncodeToString([]byte("bad-sig"))},
 		map[string]interface{}{"key": "old"},
@@ -458,7 +458,7 @@ func TestEvaluateApprovalCheck_Update_WrongKey(t *testing.T) {
 	sig := signPatchBytes(t, privKey1, patchJSON) // signed with key1 but check uses key2
 
 	// Signature (from wrong key) is on the new (incoming) object.
-	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
+	req := makeApprovalUpdateRequest("", "v1", "configmaps", "default", "my-cm",
 		nil,
 		map[string]string{defaultChangeApprovalAnnotation: sig},
 		oldData, newData,
@@ -490,7 +490,7 @@ func TestEvaluateApprovalCheck_Update_CustomAnnotationKey(t *testing.T) {
 	sig := signPatchBytes(t, privKey, patchJSON)
 
 	// Annotation is on the new (incoming) object.
-	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
+	req := makeApprovalUpdateRequest("", "v1", "configmaps", "default", "my-cm",
 		nil,
 		map[string]string{customKey: sig},
 		oldData, newData,
