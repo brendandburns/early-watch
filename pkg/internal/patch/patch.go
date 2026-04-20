@@ -21,14 +21,21 @@ var serverManagedFields = []string{
 	"selfLink",
 }
 
+// topLevelServerManagedFields lists top-level object fields that are
+// consistently controlled by Kubernetes and should be ignored when computing
+// a user-intent patch.
+var topLevelServerManagedFields = []string{
+	"status",
+}
+
 // ComputeNormalizedMergePatch computes a canonical RFC 7396 JSON merge patch
-// from oldJSON to newJSON.  Before computing the patch, server-managed
-// metadata fields and the annotation keys listed in stripAnnotations are
-// stripped from both objects so that the resulting patch only captures
-// user-visible intent.
+// from oldJSON to newJSON. Before computing the patch, server-managed
+// top-level and metadata fields and the annotation keys listed in
+// stripAnnotations are stripped from both objects so that the resulting patch
+// only captures user-visible intent.
 //
 // The returned bytes are the JSON-encoded merge patch, suitable for signing
-// or verification.  Go's encoding/json marshals map keys in sorted order, so
+// or verification. Go's encoding/json marshals map keys in sorted order, so
 // the output is deterministic.
 func ComputeNormalizedMergePatch(oldJSON, newJSON []byte, stripAnnotations []string) ([]byte, error) {
 	baseOld, err := normalizeForPatch(oldJSON, stripAnnotations)
@@ -53,13 +60,18 @@ func ComputeNormalizedMergePatch(oldJSON, newJSON []byte, stripAnnotations []str
 }
 
 // normalizeForPatch returns the object decoded from raw with server-managed
-// metadata fields removed and the specified annotation keys deleted from
-// metadata.annotations.  An empty or null annotations map is removed entirely
-// so that the resulting object is clean for patch computation.
+// top-level and metadata fields removed and the specified annotation keys
+// deleted from metadata.annotations. An empty or null annotations map is
+// removed entirely so that the resulting object is clean for patch
+// computation.
 func normalizeForPatch(raw []byte, stripAnnotations []string) (map[string]interface{}, error) {
 	var obj map[string]interface{}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, fmt.Errorf("unmarshalling object: %w", err)
+	}
+
+	for _, field := range topLevelServerManagedFields {
+		delete(obj, field)
 	}
 
 	metadata, _ := obj["metadata"].(map[string]interface{})
