@@ -173,6 +173,12 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return h.evaluateManualTouchCheck(ctx, *rule.ManualTouchCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeDataKeySafetyCheck:
+		if rule.DataKeySafetyCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type DataKeySafetyCheck but no dataKeySafetyCheck config", rule.Name)
+		}
+		return h.evaluateDataKeySafetyCheck(ctx, *rule.DataKeySafetyCheck, rule.Message, req)
+
 	case ewv1alpha1.RuleTypeCheckLock:
 		return evaluateCheckLock(rule.CheckLock, rule.Message, req)
 
@@ -778,6 +784,145 @@ func parseRSAPublicKey(pemData string) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("public key is not an RSA key")
 	}
 	return rsaPub, nil
+}
+
+// evaluateDataKeySafetyCheck denies an UPDATE request when one or more data
+// keys are removed from the subject ConfigMap or Secret and those keys are
+// still referenced (by both resource name and key name) in another cluster
+// resource.  For non-UPDATE operations the check is always a no-op.
+func (h *AdmissionHandler) evaluateDataKeySafetyCheck(
+	ctx context.Context,
+	check ewv1alpha1.DataKeySafetyCheck,
+	message string,
+	req admission.Request,
+) (bool, string, error) {
+	if req.Operation != admissionv1.Update {
+		return false, "", nil
+	}
+
+	if len(req.OldObject.Raw) == 0 || len(req.Object.Raw) == 0 {
+		return false, "", nil
+	}
+
+	oldKeys, err := dataKeysFromRaw(req.OldObject.Raw)
+	if err != nil {
+		return false, "", fmt.Errorf("extracting keys from old object: %w", err)
+	}
+	newKeys, err := dataKeysFromRaw(req.Object.Raw)
+	if err != nil {
+		return false, "", fmt.Errorf("extracting keys from new object: %w", err)
+	}
+
+	// Collect the keys that are present in the old object but missing from the new one.
+	var removedKeys []string
+	for k := range oldKeys {
+		if _, exists := newKeys[k]; !exists {
+			removedKeys = append(removedKeys, k)
+		}
+	}
+	if len(removedKeys) == 0 {
+		return false, "", nil
+	}
+
+	namespace := ""
+	if check.SameNamespace == nil || *check.SameNamespace {
+		namespace = req.Namespace
+	}
+
+	for _, res := range check.Resources {
+		version := res.Version
+		if version == "" {
+			version = "v1"
+		}
+		gvr := schema.GroupVersionResource{
+			Group:    res.APIGroup,
+			Version:  version,
+			Resource: res.Resource,
+		}
+
+		result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return false, "", fmt.Errorf("listing %s: %w", res.Resource, err)
+		}
+
+		for _, item := range result.Items {
+			for _, ref := range res.KeyReferenceFields {
+				nameSubField := ref.NameSubField
+				if nameSubField == "" {
+					nameSubField = "name"
+				}
+				keySubField := ref.KeySubField
+				if keySubField == "" {
+					keySubField = "key"
+				}
+				refPath := strings.TrimSpace(ref.RefPath)
+				if refPath == "" {
+					return false, "", fmt.Errorf("invalid empty refPath for %s", res.Resource)
+				}
+				parts := strings.Split(refPath, ".")
+				for _, removedKey := range removedKeys {
+					if keyReferenceExistsAtPath(item.Object, parts, req.Name, removedKey, nameSubField, keySubField) {
+						return true, renderMessage(message, req), nil
+					}
+				}
+			}
+		}
+	}
+
+	return false, "", nil
+}
+
+// dataKeysFromRaw returns the set of keys present in the "data" and
+// "binaryData" fields of a raw ConfigMap or Secret JSON object.
+func dataKeysFromRaw(raw []byte) (map[string]struct{}, error) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("unmarshalling object: %w", err)
+	}
+	keys := make(map[string]struct{})
+	for _, field := range []string{"data", "binaryData"} {
+		section, ok := obj[field].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for k := range section {
+			keys[k] = struct{}{}
+		}
+	}
+	return keys, nil
+}
+
+// keyReferenceExistsAtPath traverses the JSON object along parts and checks
+// whether there is a leaf map that has nameSubField == refName and
+// keySubField == dataKey as sibling string fields.  Array elements encountered
+// along the path are traversed automatically, matching the behavior of
+// nameExistsAtPath.
+func keyReferenceExistsAtPath(current interface{}, parts []string, refName, dataKey, nameSubField, keySubField string) bool {
+	if len(parts) == 0 {
+		obj, ok := current.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		nameVal, _ := obj[nameSubField].(string)
+		keyVal, _ := obj[keySubField].(string)
+		return nameVal == refName && keyVal == dataKey
+	}
+
+	switch v := current.(type) {
+	case map[string]interface{}:
+		next, ok := v[parts[0]]
+		if !ok {
+			return false
+		}
+		return keyReferenceExistsAtPath(next, parts[1:], refName, dataKey, nameSubField, keySubField)
+	case []interface{}:
+		for _, elem := range v {
+			if keyReferenceExistsAtPath(elem, parts, refName, dataKey, nameSubField, keySubField) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // evaluateServicePodSelectorCheck denies an UPDATE to a Service when the

@@ -402,6 +402,43 @@ spec:
                           services (spec.clusterIP == "None") are exempt.
                           Required when type is ServicePodSelectorCheck.
                         type: object
+                      dataKeySafetyCheck:
+                        description: >
+                          DataKeySafetyCheck prevents UPDATE requests that
+                          remove a data key from a ConfigMap or Secret when
+                          that specific key is still referenced by another
+                          resource. Required when type is DataKeySafetyCheck.
+                        type: object
+                        properties:
+                          resources:
+                            description: Resources is the list of resource types to scan for key references.
+                            type: array
+                            minItems: 1
+                            items:
+                              type: object
+                              required: ["resource"]
+                              properties:
+                                apiGroup:
+                                  type: string
+                                resource:
+                                  type: string
+                                version:
+                                  type: string
+                                keyReferenceFields:
+                                  type: array
+                                  minItems: 1
+                                  items:
+                                    type: object
+                                    required: ["refPath"]
+                                    properties:
+                                      refPath:
+                                        type: string
+                                      nameSubField:
+                                        type: string
+                                      keySubField:
+                                        type: string
+                          sameNamespace:
+                            type: boolean
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.
               type: object
