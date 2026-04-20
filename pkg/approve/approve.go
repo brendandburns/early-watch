@@ -29,6 +29,58 @@ import (
 	ewwebhook "github.com/brendandburns/early-watch/pkg/webhook"
 )
 
+// NewObject computes the normalized JSON merge patch between oldJSON and
+// newJSON, signs it with the given private key, and returns the JSON encoding
+// of newObj with the base64-encoded signature written into
+// metadata.annotations[annotationKey].
+//
+// The caller can write the returned bytes to a file and apply them with
+// "kubectl apply", which will submit the annotation-carrying object to the
+// cluster.  The EarlyWatch admission webhook verifies the annotation when the
+// UPDATE request arrives.
+func NewObject(privKey *rsa.PrivateKey, oldJSON, newJSON []byte, annotationKey string) ([]byte, error) {
+	if annotationKey == "" {
+		annotationKey = DefaultChangeApprovalAnnotation
+	}
+
+	patchJSON, err := internalpatch.ComputeNormalizedMergePatch(oldJSON, newJSON, []string{annotationKey})
+	if err != nil {
+		return nil, fmt.Errorf("computing merge patch: %w", err)
+	}
+
+	sig, err := SignPatch(privKey, patchJSON)
+	if err != nil {
+		return nil, fmt.Errorf("signing patch: %w", err)
+	}
+
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	// Decode newJSON into a map so we can inject the annotation.
+	var newObj map[string]interface{}
+	if err := json.Unmarshal(newJSON, &newObj); err != nil {
+		return nil, fmt.Errorf("unmarshalling new object: %w", err)
+	}
+
+	// Navigate / create metadata.annotations and set the key.
+	metadata, _ := newObj["metadata"].(map[string]interface{})
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+		newObj["metadata"] = metadata
+	}
+	annotations, _ := metadata["annotations"].(map[string]interface{})
+	if annotations == nil {
+		annotations = make(map[string]interface{})
+		metadata["annotations"] = annotations
+	}
+	annotations[annotationKey] = sigB64
+
+	out, err := json.MarshalIndent(newObj, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshaling annotated object: %w", err)
+	}
+	return out, nil
+}
+
 // Options holds the parameters for an approve operation.
 type Options struct {
 	PrivateKeyPath string
@@ -211,11 +263,12 @@ type ChangeOptions struct {
 //  2. Reads the desired new state from NewResourceFile (YAML or JSON).
 //  3. Computes the normalised JSON merge patch between the two states.
 //  4. Signs the SHA-256 hash of the canonical patch JSON.
-//  5. Writes the signature as a change-approval annotation on the existing
-//     resource in the cluster.
+//  5. Writes the signature as a change-approval annotation on the NEW resource
+//     object and prints the resulting JSON to stdout.
 //
-// The admission webhook will later verify this annotation when the UPDATE is
-// submitted, ensuring the actual change matches the pre-approved patch.
+// The user can pipe the output into a file and then apply it with
+// "kubectl apply -f <file>", which submits the annotated object to the cluster.
+// The admission webhook will verify the annotation when the UPDATE arrives.
 func RunChange(opts ChangeOptions) error {
 	privKey, err := LoadRSAPrivateKey(opts.PrivateKeyPath)
 	if err != nil {
@@ -240,7 +293,8 @@ func RunChange(opts ChangeOptions) error {
 		resourceClient = dynClient.Resource(gvr)
 	}
 
-	// Fetch the current (old) resource from the cluster.
+	// Fetch the current (old) resource from the cluster so that we can
+	// compute the same normalised merge patch the webhook will verify.
 	current, err := resourceClient.Get(context.Background(), opts.Name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("fetching current resource: %w", err)
@@ -282,40 +336,17 @@ func RunChange(opts ChangeOptions) error {
 		annotationKey = DefaultChangeApprovalAnnotation
 	}
 
-	// Compute the normalised merge patch (strips server-managed fields and
-	// the change-approval annotation itself from both sides).
-	patchJSON, err := internalpatch.ComputeNormalizedMergePatch(oldJSON, newJSON, []string{annotationKey})
+	// Sign the patch and embed the approval annotation into the new object.
+	annotatedJSON, err := NewObject(privKey, oldJSON, newJSON, annotationKey)
 	if err != nil {
-		return fmt.Errorf("computing merge patch: %w", err)
+		return fmt.Errorf("approving new object: %w", err)
 	}
 
-	// Sign the patch.
-	sig, err := SignPatch(privKey, patchJSON)
-	if err != nil {
-		return fmt.Errorf("signing patch: %w", err)
+	// Output the annotated new object so the user can pipe it into
+	// "kubectl apply -f -" or save it to a file first.
+	if _, err := fmt.Println(string(annotatedJSON)); err != nil {
+		return fmt.Errorf("writing output: %w", err)
 	}
-
-	sigB64 := base64.StdEncoding.EncodeToString(sig)
-
-	// Annotate the existing resource with the change-approval signature so
-	// that the admission webhook can verify it when the UPDATE is applied.
-	mergePatch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, annotationKey, sigB64)
-	if _, err := resourceClient.Patch(
-		context.Background(),
-		opts.Name,
-		types.MergePatchType,
-		[]byte(mergePatch),
-		metav1.PatchOptions{},
-	); err != nil {
-		return fmt.Errorf("annotating resource: %w", err)
-	}
-
-	location := opts.Name
-	if opts.Namespace != "" {
-		location = opts.Namespace + "/" + opts.Name
-	}
-	fmt.Printf("Successfully annotated %s %s with change-approval signature\n",
-		opts.Resource, location)
 
 	return nil
 }

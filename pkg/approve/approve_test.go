@@ -6,9 +6,13 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"os"
 	"testing"
+
+	internalpatch "github.com/brendandburns/early-watch/pkg/internal/patch"
 )
 
 // generateTestKey generates a 2048-bit RSA key pair for testing and returns
@@ -256,5 +260,131 @@ func TestSignPatch_DifferentPatchesDifferentDigests(t *testing.T) {
 	digest2 := sha256.Sum256([]byte(`{"data":{"a":"2"}}`))
 	if err := rsa.VerifyPSS(&privKey.PublicKey, crypto.SHA256, digest2[:], sig1, nil); err == nil {
 		t.Error("sig1 must not verify against a different patch")
+	}
+}
+
+// --- NewObject tests ---
+
+func TestNewObject_AnnotatesNewObject(t *testing.T) {
+	privKey, _ := generateTestKey(t)
+
+	oldJSON := []byte(`{"metadata":{"annotations":{}},"data":{"key":"old"}}`)
+	newJSON := []byte(`{"metadata":{"annotations":{}},"data":{"key":"new"}}`)
+
+	out, err := NewObject(privKey, oldJSON, newJSON, DefaultChangeApprovalAnnotation)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	meta, _ := result["metadata"].(map[string]interface{})
+	if meta == nil {
+		t.Fatal("output has no metadata")
+	}
+	anns, _ := meta["annotations"].(map[string]interface{})
+	if anns == nil {
+		t.Fatal("output metadata has no annotations")
+	}
+	sigB64, ok := anns[DefaultChangeApprovalAnnotation].(string)
+	if !ok || sigB64 == "" {
+		t.Fatal("output is missing the change-approval annotation")
+	}
+
+	// The annotation must be a valid base64 string.
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		t.Fatalf("annotation value is not valid base64: %v", err)
+	}
+	if len(sig) == 0 {
+		t.Fatal("decoded signature is empty")
+	}
+}
+
+func TestNewObject_SignatureVerifiable(t *testing.T) {
+	privKey, _ := generateTestKey(t)
+
+	oldJSON := []byte(`{"data":{"k":"1"}}`)
+	newJSON := []byte(`{"data":{"k":"2"}}`)
+
+	out, err := NewObject(privKey, oldJSON, newJSON, DefaultChangeApprovalAnnotation)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	meta, _ := result["metadata"].(map[string]interface{})
+	anns, _ := meta["annotations"].(map[string]interface{})
+	sigB64, _ := anns[DefaultChangeApprovalAnnotation].(string)
+
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		t.Fatalf("decoding signature: %v", err)
+	}
+
+	// Reproduce the same patch the function signed.
+	patchJSON, err := internalpatch.ComputeNormalizedMergePatch(oldJSON, newJSON, []string{DefaultChangeApprovalAnnotation})
+	if err != nil {
+		t.Fatalf("computing patch: %v", err)
+	}
+
+	digest := sha256.Sum256(patchJSON)
+	if err := rsa.VerifyPSS(&privKey.PublicKey, crypto.SHA256, digest[:], sig, nil); err != nil {
+		t.Errorf("signature does not verify: %v", err)
+	}
+}
+
+func TestNewObject_DefaultAnnotationKey(t *testing.T) {
+	privKey, _ := generateTestKey(t)
+	oldJSON := []byte(`{"data":{"x":"a"}}`)
+	newJSON := []byte(`{"data":{"x":"b"}}`)
+
+	out, err := NewObject(privKey, oldJSON, newJSON, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	meta, _ := result["metadata"].(map[string]interface{})
+	anns, _ := meta["annotations"].(map[string]interface{})
+	if _, ok := anns[DefaultChangeApprovalAnnotation]; !ok {
+		t.Errorf("expected annotation key %q to be set", DefaultChangeApprovalAnnotation)
+	}
+}
+
+func TestNewObject_DataPreserved(t *testing.T) {
+	privKey, _ := generateTestKey(t)
+	oldJSON := []byte(`{"data":{"key":"old"}}`)
+	newJSON := []byte(`{"data":{"key":"new"},"extraField":"value"}`)
+
+	out, err := NewObject(privKey, oldJSON, newJSON, DefaultChangeApprovalAnnotation)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+
+	// Verify the original fields from newJSON are preserved.
+	data, _ := result["data"].(map[string]interface{})
+	if data == nil {
+		t.Fatal("data field missing from output")
+	}
+	if data["key"] != "new" {
+		t.Errorf("data.key = %v; want %q", data["key"], "new")
+	}
+	if result["extraField"] != "value" {
+		t.Errorf("extraField = %v; want %q", result["extraField"], "value")
 	}
 }

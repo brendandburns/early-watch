@@ -505,7 +505,7 @@ func ResourcePath(group, version, resource, namespace, name string) string {
 // ResourcePath), signed with the private key corresponding to the public key
 // configured in the rule.
 //
-// For UPDATE operations the existing resource (OldObject) must carry a
+// For UPDATE operations the new resource (Object) must carry a
 // change-approval annotation whose value is the base64-encoded RSA-PSS
 // SHA-256 signature of the normalized JSON merge patch between the current
 // and proposed resource states.  Server-managed metadata fields and the
@@ -601,7 +601,7 @@ func evaluateDeleteApproval(check ewv1alpha1.ApprovalCheck, message string, pubK
 }
 
 // evaluateChangeApproval handles the ApprovalCheck logic for UPDATE operations
-// by verifying that the existing resource (OldObject) carries a change-approval
+// by verifying that the new resource (Object) carries a change-approval
 // annotation whose signature covers the normalised JSON merge patch between the
 // old and new resource states.
 func evaluateChangeApproval(check ewv1alpha1.ApprovalCheck, message string, pubKey *rsa.PublicKey, req admission.Request) (bool, string, error) {
@@ -610,28 +610,25 @@ func evaluateChangeApproval(check ewv1alpha1.ApprovalCheck, message string, pubK
 		annotationKey = defaultChangeApprovalAnnotation
 	}
 
-	oldRaw := req.OldObject.Raw
-	if len(oldRaw) == 0 {
-		if message == "" {
-			message = fmt.Sprintf("change requires pre-approval annotation %q on the existing resource", annotationKey)
-		}
-		return true, message, nil
+	newRaw := req.Object.Raw
+	if len(newRaw) == 0 {
+		return false, "", fmt.Errorf("object is nil for UPDATE request")
 	}
 
-	// Extract the change-approval signature from OldObject's annotations.
-	var oldMeta struct {
+	// Extract the change-approval signature from Object's (new object) annotations.
+	var newMeta struct {
 		Metadata struct {
 			Annotations map[string]string `json:"annotations"`
 		} `json:"metadata"`
 	}
-	if err := json.Unmarshal(oldRaw, &oldMeta); err != nil {
-		return false, "", fmt.Errorf("unmarshalling old object metadata: %w", err)
+	if err := json.Unmarshal(newRaw, &newMeta); err != nil {
+		return false, "", fmt.Errorf("unmarshalling new object metadata: %w", err)
 	}
 
-	sigB64, ok := oldMeta.Metadata.Annotations[annotationKey]
+	sigB64, ok := newMeta.Metadata.Annotations[annotationKey]
 	if !ok || sigB64 == "" {
 		if message == "" {
-			message = fmt.Sprintf("change requires pre-approval annotation %q on the existing resource", annotationKey)
+			message = fmt.Sprintf("change requires approval annotation %q on the incoming resource", annotationKey)
 		}
 		return true, message, nil
 	}
@@ -644,9 +641,12 @@ func evaluateChangeApproval(check ewv1alpha1.ApprovalCheck, message string, pubK
 		return true, message, nil
 	}
 
-	newRaw := req.Object.Raw
-	if len(newRaw) == 0 {
-		return false, "", fmt.Errorf("object is nil for UPDATE request")
+	oldRaw := req.OldObject.Raw
+	if len(oldRaw) == 0 {
+		if message == "" {
+			message = fmt.Sprintf("change requires pre-existing resource state to verify approval annotation %q", annotationKey)
+		}
+		return true, message, nil
 	}
 
 	// Compute the normalised merge patch, stripping the approval annotation

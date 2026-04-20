@@ -404,9 +404,10 @@ func TestEvaluateApprovalCheck_Update_ValidSignature(t *testing.T) {
 	patchJSON := mustComputePatch(t, oldJSON, newJSON, defaultChangeApprovalAnnotation)
 	sig := signPatchBytes(t, privKey, patchJSON)
 
+	// The annotation is on the new (incoming) object, not the old one.
 	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
-		map[string]string{defaultChangeApprovalAnnotation: sig},
 		nil,
+		map[string]string{defaultChangeApprovalAnnotation: sig},
 		oldData, newData,
 	)
 
@@ -423,9 +424,10 @@ func TestEvaluateApprovalCheck_Update_InvalidSignature(t *testing.T) {
 	_, pubPEM := generateTestKeyPair(t)
 	check := ewv1alpha1.ApprovalCheck{PublicKey: pubPEM}
 
+	// Bad signature is on the new (incoming) object.
 	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
-		map[string]string{defaultChangeApprovalAnnotation: base64.StdEncoding.EncodeToString([]byte("bad-sig"))},
 		nil,
+		map[string]string{defaultChangeApprovalAnnotation: base64.StdEncoding.EncodeToString([]byte("bad-sig"))},
 		map[string]interface{}{"key": "old"},
 		map[string]interface{}{"key": "new"},
 	)
@@ -455,9 +457,10 @@ func TestEvaluateApprovalCheck_Update_WrongKey(t *testing.T) {
 	patchJSON := mustComputePatch(t, oldJSON, newJSON, defaultChangeApprovalAnnotation)
 	sig := signPatchBytes(t, privKey1, patchJSON) // signed with key1 but check uses key2
 
+	// Signature (from wrong key) is on the new (incoming) object.
 	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
-		map[string]string{defaultChangeApprovalAnnotation: sig},
 		nil,
+		map[string]string{defaultChangeApprovalAnnotation: sig},
 		oldData, newData,
 	)
 
@@ -486,9 +489,10 @@ func TestEvaluateApprovalCheck_Update_CustomAnnotationKey(t *testing.T) {
 	patchJSON := mustComputePatch(t, oldJSON, newJSON, customKey)
 	sig := signPatchBytes(t, privKey, patchJSON)
 
+	// Annotation is on the new (incoming) object.
 	req := makeUpdateRequest("", "v1", "configmaps", "default", "my-cm",
-		map[string]string{customKey: sig},
 		nil,
+		map[string]string{customKey: sig},
 		oldData, newData,
 	)
 
@@ -505,7 +509,15 @@ func TestEvaluateApprovalCheck_Update_OldObjectMissing(t *testing.T) {
 	_, pubPEM := generateTestKeyPair(t)
 	check := ewv1alpha1.ApprovalCheck{PublicKey: pubPEM}
 
-	obj := map[string]interface{}{"data": map[string]interface{}{"k": "v"}}
+	// Object carries a (dummy) annotation so the code reaches the OldObject check.
+	obj := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]string{
+				defaultChangeApprovalAnnotation: base64.StdEncoding.EncodeToString([]byte("placeholder")),
+			},
+		},
+		"data": map[string]interface{}{"k": "v"},
+	}
 	raw, _ := json.Marshal(obj)
 
 	req := admission.Request{

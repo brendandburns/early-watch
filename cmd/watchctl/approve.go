@@ -18,10 +18,11 @@ func init() {
 var approveCmd = &cobra.Command{
 	Use:   "approve",
 	Short: "Sign and annotate a Kubernetes resource with an approval signature",
-	Long: `approve contains subcommands for pre-approving Kubernetes resource changes.
+	Long: `approve contains subcommands for approving Kubernetes resource changes.
 
   watchctl approve delete  – sign the resource path to pre-approve a deletion.
-  watchctl approve change  – sign the merge patch to pre-approve a modification.
+  watchctl approve change  – sign the merge patch and output the new resource JSON
+                             with the approval annotation, ready for "kubectl apply".
 
 Run 'watchctl approve <subcommand> --help' for details on each subcommand.`,
 }
@@ -105,14 +106,16 @@ func runApproveDelete(_ *cobra.Command, _ []string) error {
 
 var approveChangeCmd = &cobra.Command{
 	Use:   "change",
-	Short: "Sign the merge patch for a resource modification and write a change-approval annotation",
-	Long: `approve change computes the JSON merge patch between the current resource state
-and the desired new state (provided as a YAML or JSON file), signs the patch
-with a local RSA private key, and writes the resulting signature as a
-change-approval annotation on the existing resource in the cluster.
+	Short: "Sign the merge patch for a resource modification and output the new resource JSON with the approval annotation",
+	Long: `approve change fetches the current resource state from the cluster, computes
+the JSON merge patch between it and the desired new state (provided as a YAML
+or JSON file), signs the patch with a local RSA private key, and writes the
+approval signature as a change-approval annotation into the new resource
+object, which is then printed as JSON to stdout.
 
-The admission webhook will verify this annotation when the UPDATE is applied,
-ensuring the actual change matches the pre-approved patch.
+The output can be applied directly with "kubectl apply", which will submit
+the annotated object to the cluster.  The EarlyWatch admission webhook
+verifies the annotation when the UPDATE request arrives.
 
 Example:
 
@@ -123,7 +126,7 @@ Example:
     --resource configmaps \
     --namespace default \
     --name my-config \
-    --file new-config.yaml`,
+    --file new-config.yaml | kubectl apply -f -`,
 	RunE: runApproveChange,
 }
 
