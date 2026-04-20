@@ -15,6 +15,28 @@ EarlyWatch evaluates rules defined in a `ChangeValidator`'s `spec.rules` list.  
 | `AnnotationCheck` | Deny when the subject does not carry a required annotation (confirm-delete pattern). | [annotation-check.md](annotation-check.md) |
 | `ApprovalCheck` | Deny unless the subject carries a valid RSA-PSS SHA-256 approval signature in an annotation. | [approval-check.md](approval-check.md) |
 | `ManualTouchCheck` | Deny when a recent manual (kubectl) touch has been recorded for the resource within a configurable window. | [manual-touch-check.md](manual-touch-check.md) |
+| `ServicePodSelectorCheck` | Deny a Service UPDATE when the old selector matched Pods but the new selector would match none. | - |
+
+---
+
+## Demo Matrix
+
+Use the interactive demo driver to run any validator scenario:
+
+```bash
+bash scripts/demo.sh --demos=<key>
+```
+
+| Validator Type | Demo Key (`--demos`) | Demo Script |
+|---|---|---|
+| `ExistingResources` | `service` | `scripts/demo-service.sh` |
+| `NameReferenceCheck` | `configmap` | `scripts/demo-configmap.sh` |
+| `AnnotationCheck` | `annotation` | `scripts/demo-annotation-check.sh` |
+| `ApprovalCheck` | `approval` | `scripts/demo-approval-check.sh` |
+| `CheckLock` | `checklock` | `scripts/demo-check-lock.sh` |
+| `ExpressionCheck` | `expression` | `scripts/demo-expression-check.sh` |
+| `ManualTouchCheck` | `manualtouch` | `scripts/demo-manual-touch-check.sh` |
+| `ServicePodSelectorCheck` | `servicepodselector` | `scripts/demo-service-pod-selector-check.sh` |
 
 ---
 

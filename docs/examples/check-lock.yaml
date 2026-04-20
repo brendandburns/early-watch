@@ -1,0 +1,19 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-check-lock
+  namespace: default
+spec:
+  subject:
+    apiGroup: apps
+    resource: deployments
+  operations:
+    - DELETE
+    - UPDATE
+  rules:
+    - name: deployment-must-not-be-locked
+      type: CheckLock
+      checkLock:
+        lockOnMutate: true
+      message: >
+        Deployment "{{name}}" is locked. Remove earlywatch.io/lock before changing it.
