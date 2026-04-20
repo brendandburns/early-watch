@@ -1,0 +1,19 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-manual-touch-check
+  namespace: default
+spec:
+  subject:
+    apiGroup: apps
+    resource: deployments
+  operations:
+    - UPDATE
+  rules:
+    - name: block-recent-manual-touch
+      type: ManualTouchCheck
+      manualTouchCheck:
+        windowDuration: "2h"
+        eventNamespace: early-watch-system
+      message: >
+        Deployment "{{name}}" was recently touched manually; update denied.

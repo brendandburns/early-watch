@@ -1,0 +1,18 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-expression-check
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""
+    resource: configmaps
+  operations:
+    - DELETE
+  rules:
+    - name: block-delete-in-production-namespace
+      type: ExpressionCheck
+      expressionCheck:
+        expression: "namespace == 'production'"
+      message: >
+        Direct delete in namespace "{{namespace}}" is not permitted.

@@ -1,0 +1,20 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-annotation-check
+spec:
+  subject:
+    apiGroup: ""
+    resource: namespaces
+    names:
+      - production
+  operations:
+    - DELETE
+  rules:
+    - name: require-confirm-delete-annotation
+      type: AnnotationCheck
+      annotationCheck:
+        annotationKey: earlywatch.io/confirm-delete
+        annotationValue: "yes"
+      message: >
+        Namespace "{{name}}" requires annotation earlywatch.io/confirm-delete=yes before delete.

@@ -1,0 +1,24 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-approval-check
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""
+    resource: configmaps
+    names:
+      - critical-config
+  operations:
+    - DELETE
+  rules:
+    - name: require-approval-signature
+      type: ApprovalCheck
+      approvalCheck:
+        annotationKey: earlywatch.io/approved
+        publicKey: |
+          -----BEGIN PUBLIC KEY-----
+          REPLACE_WITH_YOUR_RSA_PUBLIC_KEY
+          -----END PUBLIC KEY-----
+      message: >
+        ConfigMap "{{name}}" cannot be deleted without a valid approval signature.

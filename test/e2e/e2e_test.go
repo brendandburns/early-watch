@@ -729,6 +729,142 @@ func writeTestKubeconfig(t *testing.T) string {
 	return path
 }
 
+// makeServicePodSelectorGuard creates a ChangeValidator that applies the
+// ServicePodSelectorCheck rule to service UPDATEs in testNamespace.
+func makeServicePodSelectorGuard(t *testing.T, name string) {
+	t.Helper()
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:                    "selector-must-keep-pods",
+				Type:                    ewv1alpha1.RuleTypeServicePodSelectorCheck,
+				Message:                 "service selector change would leave no matching pods",
+				ServicePodSelectorCheck: &ewv1alpha1.ServicePodSelectorCheck{},
+			}},
+		},
+	})
+}
+
+// TestServicePodSelectorCheck_DeniesWhenOldSelectorHadPods verifies that a
+// Service UPDATE is denied when the old selector had matching Pods but the new
+// selector would match none.
+func TestServicePodSelectorCheck_DeniesWhenOldSelectorHadPods(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makePod(t, "app-pod", map[string]string{"app": "my-app"})
+	svc := makeService(t, "my-svc", map[string]string{"app": "my-app"})
+	makeServicePodSelectorGuard(t, "svc-selector-guard")
+
+	// Update the selector to one that matches no pods.
+	fresh := &corev1.Service{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: svc.Name}, fresh); err != nil {
+		t.Fatalf("re-fetch Service: %v", err)
+	}
+	fresh.Spec.Selector = map[string]string{"app": "no-such-app"}
+	err := k8sClient.Update(context.Background(), fresh)
+	if err == nil {
+		t.Fatal("expected Service UPDATE to be denied: old selector had pods but new selector matches none")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// TestServicePodSelectorCheck_AllowsWhenNewSelectorStillHasPods verifies that a
+// Service UPDATE is allowed when both the old and new selectors have matching Pods.
+func TestServicePodSelectorCheck_AllowsWhenNewSelectorStillHasPods(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makePod(t, "app-pod-old", map[string]string{"app": "my-app"})
+	makePod(t, "app-pod-new", map[string]string{"app": "new-app"})
+	svc := makeService(t, "my-svc-keep", map[string]string{"app": "my-app"})
+	makeServicePodSelectorGuard(t, "svc-selector-guard-allow")
+
+	fresh := &corev1.Service{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: svc.Name}, fresh); err != nil {
+		t.Fatalf("re-fetch Service: %v", err)
+	}
+	fresh.Spec.Selector = map[string]string{"app": "new-app"}
+	if err := k8sClient.Update(context.Background(), fresh); err != nil {
+		t.Fatalf("expected Service UPDATE to be allowed when new selector also has matching pods: %v", err)
+	}
+}
+
+// TestServicePodSelectorCheck_AllowsWhenOldSelectorHadNoPods verifies that a
+// Service UPDATE is allowed when the old selector had no matching Pods (there is
+// nothing to protect).
+func TestServicePodSelectorCheck_AllowsWhenOldSelectorHadNoPods(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	// Pod is present but does not match the service selector.
+	makePod(t, "other-pod", map[string]string{"app": "other-app"})
+	svc := makeService(t, "my-svc-no-match", map[string]string{"app": "my-app"})
+	makeServicePodSelectorGuard(t, "svc-selector-guard-no-pods")
+
+	fresh := &corev1.Service{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: svc.Name}, fresh); err != nil {
+		t.Fatalf("re-fetch Service: %v", err)
+	}
+	fresh.Spec.Selector = map[string]string{"app": "completely-different"}
+	if err := k8sClient.Update(context.Background(), fresh); err != nil {
+		t.Fatalf("expected Service UPDATE to be allowed when old selector had no matching pods: %v", err)
+	}
+}
+
+// TestServicePodSelectorCheck_AllowsNonUpdateOperation verifies that the guard
+// does not block Service creates.
+func TestServicePodSelectorCheck_AllowsNonUpdateOperation(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makeServicePodSelectorGuard(t, "svc-selector-guard-create")
+
+	// CREATE must always be allowed by this guard (it only covers UPDATE).
+	if makeService(t, "new-svc", map[string]string{"app": "my-app"}) == nil {
+		t.Fatal("expected Service CREATE to succeed")
+	}
+}
+
+// TestServicePodSelectorCheck_AllowsHeadlessService verifies that a headless
+// service (clusterIP=None) is exempt from the check even when its selector
+// previously had matching pods.
+func TestServicePodSelectorCheck_AllowsHeadlessService(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makePod(t, "stateful-pod", map[string]string{"app": "stateful-app"})
+
+	// Create a headless Service.
+	headless := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "headless-svc", Namespace: testNamespace},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "None",
+			Selector:  map[string]string{"app": "stateful-app"},
+			Ports:     []corev1.ServicePort{{Port: 80}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), headless); err != nil {
+		t.Fatalf("create headless Service: %v", err)
+	}
+
+	makeServicePodSelectorGuard(t, "svc-selector-guard-headless")
+
+	fresh := &corev1.Service{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: headless.Name}, fresh); err != nil {
+		t.Fatalf("re-fetch headless Service: %v", err)
+	}
+	fresh.Spec.Selector = map[string]string{"app": "no-such-app"}
+	if err := k8sClient.Update(context.Background(), fresh); err != nil {
+		t.Fatalf("expected headless Service UPDATE to be allowed (headless services are exempt): %v", err)
+	}
+}
+
 // TestZZZInstallUninstall is intentionally named to sort late in `go test`
 // execution (go test orders by name alphabetically) so the
 // ValidatingWebhookConfiguration created by install does not slow down other

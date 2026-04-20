@@ -26,27 +26,6 @@ done
 # shellcheck source=scripts/demo-util.sh
 source "$(dirname "${BASH_SOURCE[0]}")/demo-util.sh"
 
-# ── Demo resource cleanup ────────────────────────────────────────────────────
-print_header "Teardown — Removing Demo Resources"
-
-print_step "Removing demo Kubernetes resources..."
-run_cmd kubectl delete service        demo-service --ignore-not-found=true
-run_cmd kubectl delete pod            demo-pod     --ignore-not-found=true
-run_cmd kubectl delete configmap      demo-config  --ignore-not-found=true
-run_cmd kubectl delete deployment     demo-app     --ignore-not-found=true
-run_cmd kubectl delete changevalidator protect-service-from-deletion   -n default --ignore-not-found=true
-run_cmd kubectl delete changevalidator protect-configmap-from-deletion -n default --ignore-not-found=true
-print_success "Demo resources removed."
-
-# ── Uninstall EarlyWatch ─────────────────────────────────────────────────────
-print_step "Uninstalling EarlyWatch..."
-if kubectl get namespace early-watch-system &>/dev/null; then
-  run_cmd "$WATCHCTL" uninstall --kubeconfig "$HOME/.kube/config"
-  print_success "EarlyWatch uninstalled."
-else
-  print_info "EarlyWatch is not installed — skipping uninstall."
-fi
-
 # ── Cluster teardown ─────────────────────────────────────────────────────────
 if [ "$SKIP_CLUSTER_DELETE" = "true" ]; then
   echo ""

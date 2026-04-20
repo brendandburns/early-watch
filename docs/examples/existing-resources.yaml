@@ -1,0 +1,21 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-existing-resources
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""
+    resource: services
+  operations:
+    - DELETE
+  rules:
+    - name: service-must-have-no-matching-pods
+      type: ExistingResources
+      existingResources:
+        apiGroup: ""
+        resource: pods
+        labelSelectorFromField: spec.selector
+        sameNamespace: true
+      message: >
+        Service "{{name}}" cannot be deleted while matching Pods still exist.
