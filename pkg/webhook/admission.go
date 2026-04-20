@@ -27,6 +27,7 @@ import (
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 	"github.com/brendandburns/early-watch/pkg/auditmonitor"
+	internalpatch "github.com/brendandburns/early-watch/pkg/internal/patch"
 )
 
 // AdmissionHandler handles admission webhook requests by evaluating
@@ -563,6 +564,10 @@ func evalSimpleExpression(expr string, ctx map[string]interface{}) (bool, error)
 // defaultApprovalAnnotation is the annotation key used when ApprovalCheck.AnnotationKey is empty.
 const defaultApprovalAnnotation = "earlywatch.io/approved"
 
+// defaultChangeApprovalAnnotation is the annotation key used when
+// ApprovalCheck.ChangeAnnotationKey is empty, for UPDATE (change) approvals.
+const defaultChangeApprovalAnnotation = "earlywatch.io/change-approved"
+
 // ResourcePath returns the canonical path string for a Kubernetes resource,
 // used as the message that must be signed for an approval annotation.
 //
@@ -584,31 +589,58 @@ func ResourcePath(group, version, resource, namespace, name string) string {
 }
 
 // evaluateApprovalCheck verifies that the resource being acted on carries a
-// valid approval annotation.  The annotation value must be the base64-encoded
+// valid approval annotation.
+//
+// For DELETE operations the annotation value must be the base64-encoded
 // RSA-PSS SHA-256 signature of the resource's canonical path (as returned by
 // ResourcePath), signed with the private key corresponding to the public key
 // configured in the rule.
 //
+// For UPDATE operations the new resource (Object) must carry a
+// change-approval annotation whose value is the base64-encoded RSA-PSS
+// SHA-256 signature of the normalized JSON merge patch between the current
+// and proposed resource states.  Server-managed metadata fields and the
+// change-approval annotation itself are excluded from the patch before
+// verification.
+//
 // The check is violated (returns true) when:
-//   - the annotation is absent, or
-//   - the annotation value is not a valid base64-encoded signature.
+//   - the required annotation is absent, or
+//   - the annotation value is not a valid base64-encoded signature, or
+//   - the signature does not verify against the expected content.
 func evaluateApprovalCheck(check ewv1alpha1.ApprovalCheck, message string, req admission.Request) (bool, string, error) {
-	// Parse the public key.
 	pubKey, err := parseRSAPublicKey(check.PublicKey)
 	if err != nil {
 		return false, "", fmt.Errorf("parsing public key: %w", err)
 	}
 
+	if req.Operation == admissionv1.Update {
+		return evaluateChangeApproval(check, message, pubKey, req)
+	}
+	return evaluateDeleteApproval(check, message, pubKey, req)
+}
+
+// evaluateDeleteApproval handles the ApprovalCheck logic for DELETE (and
+// non-UPDATE) operations by verifying the resource-path signature.
+func evaluateDeleteApproval(check ewv1alpha1.ApprovalCheck, message string, pubKey *rsa.PublicKey, req admission.Request) (bool, string, error) {
 	// Determine annotation key.
 	annotationKey := check.AnnotationKey
 	if annotationKey == "" {
 		annotationKey = defaultApprovalAnnotation
 	}
 
-	// For DELETE requests the object being deleted is in OldObject.
-	raw := req.Object.Raw
-	if len(raw) == 0 {
+	// DELETE requests carry the object being deleted in OldObject. For other
+	// non-UPDATE operations, prefer Object and fall back to OldObject if needed.
+	var raw []byte
+	if req.Operation == admissionv1.Delete {
 		raw = req.OldObject.Raw
+		if len(raw) == 0 {
+			raw = req.Object.Raw
+		}
+	} else {
+		raw = req.Object.Raw
+		if len(raw) == 0 {
+			raw = req.OldObject.Raw
+		}
 	}
 
 	// Extract annotations from the raw object.
@@ -652,6 +684,74 @@ func evaluateApprovalCheck(check ewv1alpha1.ApprovalCheck, message string, req a
 	if err := rsa.VerifyPSS(pubKey, crypto.SHA256, digest[:], sig, nil); err != nil {
 		if message == "" {
 			message = fmt.Sprintf("approval annotation %q contains an invalid signature for resource path %q", annotationKey, path)
+		}
+		return true, message, nil
+	}
+
+	return false, "", nil
+}
+
+// evaluateChangeApproval handles the ApprovalCheck logic for UPDATE operations
+// by verifying that the new resource (Object) carries a change-approval
+// annotation whose signature covers the normalised JSON merge patch between the
+// old and new resource states.
+func evaluateChangeApproval(check ewv1alpha1.ApprovalCheck, message string, pubKey *rsa.PublicKey, req admission.Request) (bool, string, error) {
+	annotationKey := check.ChangeAnnotationKey
+	if annotationKey == "" {
+		annotationKey = defaultChangeApprovalAnnotation
+	}
+
+	newRaw := req.Object.Raw
+	if len(newRaw) == 0 {
+		return false, "", fmt.Errorf("object is nil for UPDATE request")
+	}
+
+	// Extract the change-approval signature from Object's (new object) annotations.
+	var newMeta struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(newRaw, &newMeta); err != nil {
+		return false, "", fmt.Errorf("unmarshalling new object metadata: %w", err)
+	}
+
+	sigB64, ok := newMeta.Metadata.Annotations[annotationKey]
+	if !ok || sigB64 == "" {
+		if message == "" {
+			message = fmt.Sprintf("change requires approval annotation %q on the incoming resource", annotationKey)
+		}
+		return true, message, nil
+	}
+
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		if message == "" {
+			message = fmt.Sprintf("change-approval annotation %q contains an invalid base64 value", annotationKey)
+		}
+		return true, message, nil
+	}
+
+	oldRaw := req.OldObject.Raw
+	if len(oldRaw) == 0 {
+		if message == "" {
+			message = fmt.Sprintf("change requires pre-existing resource state to verify approval annotation %q", annotationKey)
+		}
+		return true, message, nil
+	}
+
+	// Compute the normalised merge patch, stripping the approval annotation
+	// from both sides so it does not affect the signed content.
+	patchJSON, err := internalpatch.ComputeNormalizedMergePatch(oldRaw, newRaw, []string{annotationKey})
+	if err != nil {
+		return false, "", fmt.Errorf("computing change patch: %w", err)
+	}
+
+	// Verify the RSA-PSS SHA-256 signature over the canonical patch JSON.
+	digest := sha256.Sum256(patchJSON)
+	if err := rsa.VerifyPSS(pubKey, crypto.SHA256, digest[:], sig, nil); err != nil {
+		if message == "" {
+			message = "change-approval annotation contains an invalid signature for the proposed changes"
 		}
 		return true, message, nil
 	}

@@ -4,6 +4,7 @@
 package approve
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -11,18 +12,74 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
 
+	internalpatch "github.com/brendandburns/early-watch/pkg/internal/patch"
 	ewwebhook "github.com/brendandburns/early-watch/pkg/webhook"
 )
+
+// NewObject computes the normalized JSON merge patch between oldJSON and
+// newJSON, signs it with the given private key, and returns the JSON encoding
+// of newObj with the base64-encoded signature written into
+// metadata.annotations[annotationKey].
+//
+// The caller can write the returned bytes to a file and apply them with
+// "kubectl apply", which will submit the annotation-carrying object to the
+// cluster.  The EarlyWatch admission webhook verifies the annotation when the
+// UPDATE request arrives.
+func NewObject(privKey *rsa.PrivateKey, oldJSON, newJSON []byte, annotationKey string) ([]byte, error) {
+	if annotationKey == "" {
+		annotationKey = DefaultChangeApprovalAnnotation
+	}
+
+	patchJSON, err := internalpatch.ComputeNormalizedMergePatch(oldJSON, newJSON, []string{annotationKey})
+	if err != nil {
+		return nil, fmt.Errorf("computing merge patch: %w", err)
+	}
+
+	sig, err := SignPatch(privKey, patchJSON)
+	if err != nil {
+		return nil, fmt.Errorf("signing patch: %w", err)
+	}
+
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	// Decode newJSON into a map so we can inject the annotation.
+	var newObj map[string]interface{}
+	if err := json.Unmarshal(newJSON, &newObj); err != nil {
+		return nil, fmt.Errorf("unmarshalling new object: %w", err)
+	}
+
+	// Navigate / create metadata.annotations and set the key.
+	metadata, _ := newObj["metadata"].(map[string]interface{})
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+		newObj["metadata"] = metadata
+	}
+	annotations, _ := metadata["annotations"].(map[string]interface{})
+	if annotations == nil {
+		annotations = make(map[string]interface{})
+		metadata["annotations"] = annotations
+	}
+	annotations[annotationKey] = sigB64
+
+	out, err := json.MarshalIndent(newObj, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshaling annotated object: %w", err)
+	}
+	return out, nil
+}
 
 // Options holds the parameters for an approve operation.
 type Options struct {
@@ -162,4 +219,134 @@ func BuildDynamicClient(kubeconfig string) (dynamic.Interface, error) {
 		return nil, fmt.Errorf("building REST config: %w", err)
 	}
 	return dynamic.NewForConfig(cfg)
+}
+
+// DefaultChangeApprovalAnnotation is the annotation key used for UPDATE
+// (change) approvals when ChangeOptions.AnnotationKey is empty.
+const DefaultChangeApprovalAnnotation = "earlywatch.io/change-approved"
+
+// SignPatch computes the RSA-PSS SHA-256 signature of the given canonical
+// patch JSON bytes.  The patch must already be in its canonical (normalized)
+// form so that the signature can be reproduced deterministically.
+func SignPatch(key *rsa.PrivateKey, patchJSON []byte) ([]byte, error) {
+	digest := sha256.Sum256(patchJSON)
+	sig, err := rsa.SignPSS(rand.Reader, key, crypto.SHA256, digest[:], nil)
+	if err != nil {
+		return nil, fmt.Errorf("RSA-PSS signing: %w", err)
+	}
+	return sig, nil
+}
+
+// ChangeOptions holds the parameters for a change-approval (UPDATE) operation.
+type ChangeOptions struct {
+	// PrivateKeyPath is the path to the PEM-encoded RSA private key file.
+	PrivateKeyPath string
+	// Kubeconfig is the path to a kubeconfig file.  Falls back to in-cluster
+	// config when empty.
+	Kubeconfig string
+	// Group, Version, Resource, Namespace, Name identify the resource to approve.
+	Group     string
+	Version   string
+	Resource  string
+	Namespace string
+	Name      string
+	// AnnotationKey is the annotation to write the change-approval signature
+	// to on the existing resource.  Defaults to "earlywatch.io/change-approved".
+	AnnotationKey string
+	// NewResourceFile is the path to a YAML or JSON file containing the
+	// desired new state of the resource.
+	NewResourceFile string
+}
+
+// RunChange approves a modification to a Kubernetes resource.  It:
+//  1. Fetches the current resource from the cluster.
+//  2. Reads the desired new state from NewResourceFile (YAML or JSON).
+//  3. Computes the normalised JSON merge patch between the two states.
+//  4. Signs the SHA-256 hash of the canonical patch JSON.
+//  5. Writes the signature as a change-approval annotation on the NEW resource
+//     object and prints the resulting JSON to stdout.
+//
+// The user can pipe the output into a file and then apply it with
+// "kubectl apply -f <file>", which submits the annotated object to the cluster.
+// The admission webhook will verify the annotation when the UPDATE arrives.
+func RunChange(opts ChangeOptions) error {
+	privKey, err := LoadRSAPrivateKey(opts.PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("loading private key: %w", err)
+	}
+
+	dynClient, err := BuildDynamicClient(opts.Kubeconfig)
+	if err != nil {
+		return fmt.Errorf("building Kubernetes client: %w", err)
+	}
+
+	gvr := schema.GroupVersionResource{
+		Group:    opts.Group,
+		Version:  opts.Version,
+		Resource: opts.Resource,
+	}
+
+	var resourceClient dynamic.ResourceInterface
+	if opts.Namespace != "" {
+		resourceClient = dynClient.Resource(gvr).Namespace(opts.Namespace)
+	} else {
+		resourceClient = dynClient.Resource(gvr)
+	}
+
+	// Fetch the current (old) resource from the cluster so that we can
+	// compute the same normalised merge patch the webhook will verify.
+	current, err := resourceClient.Get(context.Background(), opts.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("fetching current resource: %w", err)
+	}
+
+	oldJSON, err := json.Marshal(current.Object)
+	if err != nil {
+		return fmt.Errorf("marshaling current resource: %w", err)
+	}
+
+	// Read the new resource from the file (YAML or JSON).
+	fileData, err := os.ReadFile(opts.NewResourceFile)
+	if err != nil {
+		return fmt.Errorf("reading new resource file %q: %w", opts.NewResourceFile, err)
+	}
+
+	var newObj map[string]interface{}
+	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(fileData), 4096)
+	if err := decoder.Decode(&newObj); err != nil {
+		return fmt.Errorf("decoding new resource file %q: %w", opts.NewResourceFile, err)
+	}
+
+	var extraDoc interface{}
+	err = decoder.Decode(&extraDoc)
+	switch {
+	case err == nil:
+		return fmt.Errorf("decoding new resource file %q: expected exactly one YAML or JSON object, found additional document content", opts.NewResourceFile)
+	case err != io.EOF:
+		return fmt.Errorf("validating new resource file %q: %w", opts.NewResourceFile, err)
+	}
+
+	newJSON, err := json.Marshal(newObj)
+	if err != nil {
+		return fmt.Errorf("marshaling new resource: %w", err)
+	}
+
+	annotationKey := opts.AnnotationKey
+	if annotationKey == "" {
+		annotationKey = DefaultChangeApprovalAnnotation
+	}
+
+	// Sign the patch and embed the approval annotation into the new object.
+	annotatedJSON, err := NewObject(privKey, oldJSON, newJSON, annotationKey)
+	if err != nil {
+		return fmt.Errorf("approving new object: %w", err)
+	}
+
+	// Output the annotated new object so the user can pipe it into
+	// "kubectl apply -f -" or save it to a file first.
+	if _, err := fmt.Println(string(annotatedJSON)); err != nil {
+		return fmt.Errorf("writing output: %w", err)
+	}
+
+	return nil
 }

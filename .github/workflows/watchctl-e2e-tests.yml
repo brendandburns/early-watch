@@ -129,7 +129,7 @@ jobs:
         if: ${{ matrix.manual_touch }}
         run: watchctl list-touches --kubeconfig "$HOME/.kube/config"
 
-      - name: Test watchctl approve
+      - name: Test watchctl approve delete
         run: |
           # Generate an RSA private key for testing (PKCS#8 format)
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/test-key.pem
@@ -137,8 +137,8 @@ jobs:
           # Create a ConfigMap to sign
           kubectl create configmap test-approval --from-literal=key=value
 
-          # Sign and annotate the ConfigMap
-          watchctl approve \
+          # Sign and annotate the ConfigMap for delete approval
+          watchctl approve delete \
             --kubeconfig "$HOME/.kube/config" \
             --private-key /tmp/test-key.pem \
             --resource configmaps \
