@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -260,6 +261,15 @@ func RunChange(opts ChangeOptions) error {
 	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(fileData), 4096)
 	if err := decoder.Decode(&newObj); err != nil {
 		return fmt.Errorf("decoding new resource file %q: %w", opts.NewResourceFile, err)
+	}
+
+	var extraDoc interface{}
+	err = decoder.Decode(&extraDoc)
+	switch {
+	case err == nil:
+		return fmt.Errorf("decoding new resource file %q: expected exactly one YAML or JSON object, found additional document content", opts.NewResourceFile)
+	case err != io.EOF:
+		return fmt.Errorf("validating new resource file %q: %w", opts.NewResourceFile, err)
 	}
 
 	newJSON, err := json.Marshal(newObj)
