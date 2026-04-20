@@ -507,7 +507,7 @@ func ResourcePath(group, version, resource, namespace, name string) string {
 //
 // For UPDATE operations the existing resource (OldObject) must carry a
 // change-approval annotation whose value is the base64-encoded RSA-PSS
-// SHA-256 signature of the normalised JSON merge patch between the current
+// SHA-256 signature of the normalized JSON merge patch between the current
 // and proposed resource states.  Server-managed metadata fields and the
 // change-approval annotation itself are excluded from the patch before
 // verification.
