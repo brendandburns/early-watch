@@ -22,7 +22,7 @@ spec:
       serviceAccountName: early-watch
       containers:
         - name: webhook
-          image: early-watch:latest
+          image: early-watch:IMAGE_TAG
           imagePullPolicy: IfNotPresent
           args:
             - --cert-dir=/tmp/k8s-webhook-server/serving-certs

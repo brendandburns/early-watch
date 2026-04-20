@@ -1,0 +1,17 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-service-pod-selector-check
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""
+    resource: services
+  operations:
+    - UPDATE
+  rules:
+    - name: prevent-selector-drop-to-zero-pods
+      type: ServicePodSelectorCheck
+      servicePodSelectorCheck: {}
+      message: >
+        Service "{{name}}" update would leave zero selected Pods and is denied.

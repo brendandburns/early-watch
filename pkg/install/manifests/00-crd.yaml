@@ -173,6 +173,8 @@ spec:
                           - ApprovalCheck
                           - AnnotationCheck
                           - CheckLock
+                          - ManualTouchCheck
+                          - ServicePodSelectorCheck
                       message:
                         description: >
                           Message is the human-readable denial message
@@ -357,6 +359,86 @@ spec:
                               that the annotation must have. When omitted, any
                               value is accepted as long as the key is present.
                             type: string
+                      checkLock:
+                        description: >
+                          CheckLock optionally configures the CheckLock rule.
+                          When omitted the rule applies only to DELETE
+                          operations (the default behavior).
+                        type: object
+                        properties:
+                          lockOnMutate:
+                            description: >
+                              LockOnMutate, when true, extends the lock check
+                              to UPDATE operations in addition to DELETE
+                              operations. When false or omitted the check only
+                              applies to DELETE requests.
+                            type: boolean
+                      manualTouchCheck:
+                        description: >
+                          ManualTouchCheck denies the request when a recent
+                          manual touch (kubectl operation) has been recorded for
+                          the same resource within a configurable look-back
+                          window. Required when type is ManualTouchCheck.
+                        type: object
+                        properties:
+                          windowDuration:
+                            description: >
+                              WindowDuration is the look-back period used to
+                              search for recent manual touch events. The value
+                              must be a Go duration string, e.g. "30m", "2h".
+                              Defaults to "1h" when omitted.
+                            type: string
+                          eventNamespace:
+                            description: >
+                              EventNamespace is the namespace where
+                              ManualTouchEvent resources are stored. Defaults
+                              to "early-watch-system" when omitted.
+                            type: string
+                      servicePodSelectorCheck:
+                        description: >
+                          ServicePodSelectorCheck denies an UPDATE to a Service
+                          when the service previously selected at least one Pod
+                          but would select no Pods after the change. Headless
+                          services (spec.clusterIP == "None") are exempt.
+                          Required when type is ServicePodSelectorCheck.
+                        type: object
+                      dataKeySafetyCheck:
+                        description: >
+                          DataKeySafetyCheck prevents UPDATE requests that
+                          remove a data key from a ConfigMap or Secret when
+                          that specific key is still referenced by another
+                          resource. Required when type is DataKeySafetyCheck.
+                        type: object
+                        properties:
+                          resources:
+                            description: Resources is the list of resource types to scan for key references.
+                            type: array
+                            minItems: 1
+                            items:
+                              type: object
+                              required: ["resource"]
+                              properties:
+                                apiGroup:
+                                  type: string
+                                resource:
+                                  type: string
+                                version:
+                                  type: string
+                                keyReferenceFields:
+                                  type: array
+                                  minItems: 1
+                                  items:
+                                    type: object
+                                    required: ["refPath"]
+                                    properties:
+                                      refPath:
+                                        type: string
+                                      nameSubField:
+                                        type: string
+                                      keySubField:
+                                        type: string
+                          sameNamespace:
+                            type: boolean
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.
               type: object

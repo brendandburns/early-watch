@@ -2,6 +2,7 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rsa"
@@ -173,8 +174,20 @@ func (h *AdmissionHandler) evaluateRule(
 		}
 		return h.evaluateManualTouchCheck(ctx, *rule.ManualTouchCheck, rule.Message, req)
 
+	case ewv1alpha1.RuleTypeDataKeySafetyCheck:
+		if rule.DataKeySafetyCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type DataKeySafetyCheck but no dataKeySafetyCheck config", rule.Name)
+		}
+		return h.evaluateDataKeySafetyCheck(ctx, *rule.DataKeySafetyCheck, rule.Message, req)
+
 	case ewv1alpha1.RuleTypeCheckLock:
-		return evaluateCheckLock(rule.Message, req)
+		return evaluateCheckLock(rule.CheckLock, rule.Message, req)
+
+	case ewv1alpha1.RuleTypeServicePodSelectorCheck:
+		if rule.ServicePodSelectorCheck == nil {
+			return false, "", fmt.Errorf("rule %q has type ServicePodSelectorCheck but no ServicePodSelectorCheck config", rule.Name)
+		}
+		return h.evaluateServicePodSelectorCheck(ctx, rule.Message, req)
 
 	default:
 		return false, "", fmt.Errorf("unknown rule type %q in rule %q", rule.Type, rule.Name)
@@ -390,14 +403,44 @@ func selectorFromField(raw []byte, fieldPath string) (labels.Selector, error) {
 }
 
 // evaluateCheckLock denies a DELETE request when the subject resource carries
-// the earlywatch.io/lock annotation.  For non-DELETE operations the check is
-// always a no-op (returns not-violated).
-func evaluateCheckLock(message string, req admission.Request) (bool, string, error) {
-	if req.Operation != admissionv1.Delete {
+// the earlywatch.io/lock annotation.  When cfg is non-nil and LockOnMutate is
+// true the check is also applied to UPDATE requests.  For all other operations
+// the check is a no-op.
+//
+// Special case for UPDATE with LockOnMutate: if the only change between the
+// old and new object is the removal or clearing of the earlywatch.io/lock
+// annotation itself, the UPDATE is allowed so that operators can always
+// unlock a resource.
+func evaluateCheckLock(cfg *ewv1alpha1.CheckLockRule, message string, req admission.Request) (bool, string, error) {
+	lockOnMutate := cfg != nil && cfg.LockOnMutate != nil && *cfg.LockOnMutate
+
+	switch req.Operation {
+	case admissionv1.Delete:
+		// continue below
+	case admissionv1.Update:
+		if !lockOnMutate {
+			return false, "", nil
+		}
+		// Special case: always allow an UPDATE whose only change is removing
+		// or clearing the earlywatch.io/lock annotation.  This ensures that
+		// an operator can always unlock a resource, even when lockOnMutate
+		// is true.
+		if len(req.OldObject.Raw) > 0 && len(req.Object.Raw) > 0 {
+			onlyLock, err := isOnlyLockAnnotationChange(req.OldObject.Raw, req.Object.Raw)
+			if err != nil {
+				return false, "", fmt.Errorf("comparing old and new object for lock annotation change: %w", err)
+			}
+			if onlyLock {
+				return false, "", nil
+			}
+		}
+		// continue below
+	default:
 		return false, "", nil
 	}
 
 	// For DELETE requests the object being deleted is in OldObject.
+	// For UPDATE requests the pre-update state is also in OldObject.
 	raw := req.OldObject.Raw
 	if len(raw) == 0 {
 		// Fall back to Object in case the webhook is configured to populate it.
@@ -424,6 +467,54 @@ func evaluateCheckLock(message string, req admission.Request) (bool, string, err
 		return true, message, nil
 	}
 	return false, "", nil
+}
+
+// isOnlyLockAnnotationChange reports whether the only difference between
+// oldRaw and newRaw is the removal or clearing of the earlywatch.io/lock
+// annotation.  It strips the lock annotation key from both objects and
+// compares the JSON-encoded results; if they are equal, no other fields
+// changed.
+func isOnlyLockAnnotationChange(oldRaw, newRaw []byte) (bool, error) {
+	var oldObj, newObj map[string]interface{}
+	if err := json.Unmarshal(oldRaw, &oldObj); err != nil {
+		return false, fmt.Errorf("unmarshalling old object: %w", err)
+	}
+	if err := json.Unmarshal(newRaw, &newObj); err != nil {
+		return false, fmt.Errorf("unmarshalling new object: %w", err)
+	}
+
+	stripLockAnnotation(oldObj)
+	stripLockAnnotation(newObj)
+
+	oldJSON, err := json.Marshal(oldObj)
+	if err != nil {
+		return false, fmt.Errorf("marshaling old object: %w", err)
+	}
+	newJSON, err := json.Marshal(newObj)
+	if err != nil {
+		return false, fmt.Errorf("marshaling new object: %w", err)
+	}
+	return bytes.Equal(oldJSON, newJSON), nil
+}
+
+// stripLockAnnotation removes the earlywatch.io/lock annotation from an
+// unmarshalled object's metadata in place.  If the annotations map becomes
+// empty after removal, the "annotations" key is also deleted so that the
+// comparison in isOnlyLockAnnotationChange is not skewed by an empty map
+// versus an absent key.
+func stripLockAnnotation(obj map[string]interface{}) {
+	metadata, ok := obj["metadata"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	annotations, ok := metadata["annotations"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	delete(annotations, ewv1alpha1.LockAnnotation)
+	if len(annotations) == 0 {
+		delete(metadata, "annotations")
+	}
 }
 
 // evaluateExpression evaluates a CEL expression check against the admission
@@ -793,4 +884,280 @@ func parseRSAPublicKey(pemData string) (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("public key is not an RSA key")
 	}
 	return rsaPub, nil
+}
+
+// evaluateDataKeySafetyCheck denies an UPDATE request when one or more data
+// keys are removed from the subject ConfigMap or Secret and those keys are
+// still referenced (by both resource name and key name) in another cluster
+// resource.  For non-UPDATE operations the check is always a no-op.
+func (h *AdmissionHandler) evaluateDataKeySafetyCheck(
+	ctx context.Context,
+	check ewv1alpha1.DataKeySafetyCheck,
+	message string,
+	req admission.Request,
+) (bool, string, error) {
+	if req.Operation != admissionv1.Update {
+		return false, "", nil
+	}
+
+	if len(req.OldObject.Raw) == 0 || len(req.Object.Raw) == 0 {
+		return false, "", nil
+	}
+
+	oldKeys, err := dataKeysFromRaw(req.OldObject.Raw)
+	if err != nil {
+		return false, "", fmt.Errorf("extracting keys from old object: %w", err)
+	}
+	newKeys, err := dataKeysFromRaw(req.Object.Raw)
+	if err != nil {
+		return false, "", fmt.Errorf("extracting keys from new object: %w", err)
+	}
+
+	// Collect the keys that are present in the old object but missing from the new one.
+	var removedKeys []string
+	for k := range oldKeys {
+		if _, exists := newKeys[k]; !exists {
+			removedKeys = append(removedKeys, k)
+		}
+	}
+	if len(removedKeys) == 0 {
+		return false, "", nil
+	}
+
+	namespace := ""
+	if check.SameNamespace == nil || *check.SameNamespace {
+		namespace = req.Namespace
+	}
+
+	for _, res := range check.Resources {
+		version := res.Version
+		if version == "" {
+			version = "v1"
+		}
+		gvr := schema.GroupVersionResource{
+			Group:    res.APIGroup,
+			Version:  version,
+			Resource: res.Resource,
+		}
+
+		result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return false, "", fmt.Errorf("listing %s: %w", res.Resource, err)
+		}
+
+		for _, item := range result.Items {
+			for _, ref := range res.KeyReferenceFields {
+				nameSubField := ref.NameSubField
+				if nameSubField == "" {
+					nameSubField = "name"
+				}
+				keySubField := ref.KeySubField
+				if keySubField == "" {
+					keySubField = "key"
+				}
+				refPath := strings.TrimSpace(ref.RefPath)
+				if refPath == "" {
+					return false, "", fmt.Errorf("invalid empty refPath for %s", res.Resource)
+				}
+				parts := strings.Split(refPath, ".")
+				for _, removedKey := range removedKeys {
+					if keyReferenceExistsAtPath(item.Object, parts, req.Name, removedKey, nameSubField, keySubField) {
+						return true, renderMessage(message, req), nil
+					}
+				}
+			}
+		}
+	}
+
+	return false, "", nil
+}
+
+// dataKeysFromRaw returns the set of keys present in the "data" and
+// "binaryData" fields of a raw ConfigMap or Secret JSON object.
+func dataKeysFromRaw(raw []byte) (map[string]struct{}, error) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, fmt.Errorf("unmarshalling object: %w", err)
+	}
+	keys := make(map[string]struct{})
+	for _, field := range []string{"data", "binaryData"} {
+		section, ok := obj[field].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		for k := range section {
+			keys[k] = struct{}{}
+		}
+	}
+	return keys, nil
+}
+
+// keyReferenceExistsAtPath traverses the JSON object along parts and checks
+// whether there is a leaf map that has nameSubField == refName and
+// keySubField == dataKey as sibling string fields.  Array elements encountered
+// along the path are traversed automatically, matching the behavior of
+// nameExistsAtPath.
+func keyReferenceExistsAtPath(current interface{}, parts []string, refName, dataKey, nameSubField, keySubField string) bool {
+	if len(parts) == 0 {
+		obj, ok := current.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		nameVal, _ := obj[nameSubField].(string)
+		keyVal, _ := obj[keySubField].(string)
+		return nameVal == refName && keyVal == dataKey
+	}
+
+	switch v := current.(type) {
+	case map[string]interface{}:
+		next, ok := v[parts[0]]
+		if !ok {
+			return false
+		}
+		return keyReferenceExistsAtPath(next, parts[1:], refName, dataKey, nameSubField, keySubField)
+	case []interface{}:
+		for _, elem := range v {
+			if keyReferenceExistsAtPath(elem, parts, refName, dataKey, nameSubField, keySubField) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// evaluateServicePodSelectorCheck denies an UPDATE to a Service when the
+// service previously selected at least one Pod but would select no Pods after
+// the change.  The check is a no-op for non-UPDATE requests and for headless
+// services (spec.clusterIP == "None").
+func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
+	ctx context.Context,
+	message string,
+	req admission.Request,
+) (bool, string, error) {
+	// Only applicable to UPDATE operations.
+	if req.Operation != admissionv1.Update {
+		return false, "", nil
+	}
+
+	oldRaw := req.OldObject.Raw
+	if len(oldRaw) == 0 {
+		return false, "", nil
+	}
+
+	// Parse the old service to get its selector and clusterIP.
+	oldSelector, oldClusterIP, err := parseServiceSelectorAndClusterIP(oldRaw)
+	if err != nil {
+		return false, "", fmt.Errorf("parsing old service object: %w", err)
+	}
+
+	// If the old service had no selector (nil) it could not have matched any
+	// Pods, so there is nothing to protect.  Note: an empty map ({}) is a
+	// valid selector that matches all Pods and is handled below.
+	if oldSelector == nil {
+		return false, "", nil
+	}
+
+	// Headless services are exempt from this check.
+	if oldClusterIP == "None" {
+		return false, "", nil
+	}
+
+	// Check whether the old service actually had matching Pods.
+	oldHasPods, err := h.serviceHasMatchingPods(ctx, req.Namespace, oldSelector)
+	if err != nil {
+		return false, "", fmt.Errorf("checking pods for old service selector: %w", err)
+	}
+	if !oldHasPods {
+		// Previously no matching Pods – the change is safe.
+		return false, "", nil
+	}
+
+	// Old service had matching Pods.  Check if the new service also selects Pods.
+	newRaw := req.Object.Raw
+	if len(newRaw) == 0 {
+		return false, "", nil
+	}
+
+	newSelector, _, err := parseServiceSelectorAndClusterIP(newRaw)
+	if err != nil {
+		return false, "", fmt.Errorf("parsing new service object: %w", err)
+	}
+
+	// Absent selector (nil) on the new service means no Pods will be selected.
+	// An empty map ({}) is a valid selector that matches all Pods, so it is
+	// not treated as absent.
+	if newSelector == nil {
+		return true, renderMessage(message, req), nil
+	}
+
+	newHasPods, err := h.serviceHasMatchingPods(ctx, req.Namespace, newSelector)
+	if err != nil {
+		return false, "", fmt.Errorf("checking pods for new service selector: %w", err)
+	}
+	if !newHasPods {
+		return true, renderMessage(message, req), nil
+	}
+
+	return false, "", nil
+}
+
+// serviceHasMatchingPods reports whether any Pods in the given namespace match
+// the provided label selector map.
+func (h *AdmissionHandler) serviceHasMatchingPods(
+	ctx context.Context,
+	namespace string,
+	selectorMap map[string]string,
+) (bool, error) {
+	sel := labels.SelectorFromSet(labels.Set(selectorMap))
+	gvr := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "pods",
+	}
+	result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: sel.String(),
+		Limit:         1,
+	})
+	if err != nil {
+		return false, fmt.Errorf("listing Pods: %w", err)
+	}
+	return len(result.Items) > 0, nil
+}
+
+// parseServiceSelectorAndClusterIP extracts spec.selector (as a
+// map[string]string) and spec.clusterIP from a raw Service JSON object.
+// It returns nil selector and empty clusterIP when the fields are absent.
+func parseServiceSelectorAndClusterIP(raw []byte) (map[string]string, string, error) {
+	var obj map[string]interface{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, "", fmt.Errorf("unmarshalling service: %w", err)
+	}
+
+	spec, _ := obj["spec"].(map[string]interface{})
+	if spec == nil {
+		return nil, "", nil
+	}
+
+	clusterIP, _ := spec["clusterIP"].(string)
+
+	selectorRaw, ok := spec["selector"]
+	if !ok || selectorRaw == nil {
+		return nil, clusterIP, nil
+	}
+
+	selectorMap, ok := selectorRaw.(map[string]interface{})
+	if !ok {
+		return nil, clusterIP, fmt.Errorf("spec.selector is not a map")
+	}
+
+	result := make(map[string]string, len(selectorMap))
+	for k, v := range selectorMap {
+		str, ok := v.(string)
+		if !ok {
+			return nil, clusterIP, fmt.Errorf("selector value for key %q is not a string", k)
+		}
+		result[k] = str
+	}
+
+	return result, clusterIP, nil
 }

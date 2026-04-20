@@ -184,6 +184,21 @@ func (in *GuardRule) DeepCopyInto(out *GuardRule) {
 		*out = new(ManualTouchCheck)
 		**out = **in
 	}
+	if in.CheckLock != nil {
+		in, out := &in.CheckLock, &out.CheckLock
+		*out = new(CheckLockRule)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.DataKeySafetyCheck != nil {
+		in, out := &in.DataKeySafetyCheck, &out.DataKeySafetyCheck
+		*out = new(DataKeySafetyCheck)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.ServicePodSelectorCheck != nil {
+		in, out := &in.ServicePodSelectorCheck, &out.ServicePodSelectorCheck
+		*out = new(ServicePodSelectorCheck)
+		**out = **in
+	}
 }
 
 // DeepCopy returns a deep copy of a GuardRule.
@@ -331,6 +346,100 @@ func (in *ManualTouchCheck) DeepCopy() *ManualTouchCheck {
 	}
 	out := new(ManualTouchCheck)
 	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *CheckLockRule) DeepCopyInto(out *CheckLockRule) {
+	*out = *in
+	if in.LockOnMutate != nil {
+		in, out := &in.LockOnMutate, &out.LockOnMutate
+		*out = new(bool)
+		**out = **in
+	}
+}
+
+// DeepCopy returns a deep copy of a CheckLockRule.
+func (in *CheckLockRule) DeepCopy() *CheckLockRule {
+	if in == nil {
+		return nil
+	}
+	out := new(CheckLockRule)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ServicePodSelectorCheck) DeepCopyInto(out *ServicePodSelectorCheck) {
+	*out = *in
+}
+
+// DeepCopy returns a deep copy of a ServicePodSelectorCheck.
+func (in *ServicePodSelectorCheck) DeepCopy() *ServicePodSelectorCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(ServicePodSelectorCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+func (in *DataKeySafetyCheck) DeepCopyInto(out *DataKeySafetyCheck) {
+	*out = *in
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = make([]DataKeyReferenceResource, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+	if in.SameNamespace != nil {
+		in, out := &in.SameNamespace, &out.SameNamespace
+		*out = new(bool)
+		**out = **in
+	}
+}
+
+// DeepCopy returns a deep copy of a DataKeySafetyCheck.
+func (in *DataKeySafetyCheck) DeepCopy() *DataKeySafetyCheck {
+	if in == nil {
+		return nil
+	}
+	out := new(DataKeySafetyCheck)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *DataKeyReferenceResource) DeepCopyInto(out *DataKeyReferenceResource) {
+	*out = *in
+	if in.KeyReferenceFields != nil {
+		in, out := &in.KeyReferenceFields, &out.KeyReferenceFields
+		*out = make([]KeyReferenceField, len(*in))
+		copy(*out, *in)
+	}
+}
+
+// DeepCopy returns a deep copy of a DataKeyReferenceResource.
+func (in *DataKeyReferenceResource) DeepCopy() *DataKeyReferenceResource {
+	if in == nil {
+		return nil
+	}
+	out := new(DataKeyReferenceResource)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopy returns a deep copy of a KeyReferenceField.
+func (in *KeyReferenceField) DeepCopy() *KeyReferenceField {
+	if in == nil {
+		return nil
+	}
+	out := new(KeyReferenceField)
+	*out = *in
 	return out
 }
 

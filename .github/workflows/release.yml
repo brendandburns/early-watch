@@ -54,7 +54,7 @@ jobs:
             EXT=".exe"
           fi
           BINARY="watchctl-${{ inputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
-          go build -trimpath -ldflags="-s -w" -o "${BINARY}" ./cmd/watchctl
+          go build -trimpath -ldflags="-s -w -X github.com/brendandburns/early-watch/cmd/watchctl.Version=${{ inputs.version }} -X github.com/brendandburns/early-watch/pkg/install.Version=${{ inputs.version }}" -o "${BINARY}" ./cmd/watchctl
           echo "BINARY=${BINARY}" >> "$GITHUB_ENV"
 
       - name: Verify release exists

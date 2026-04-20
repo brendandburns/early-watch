@@ -172,8 +172,9 @@ spec:
                           - NameReferenceCheck
                           - ApprovalCheck
                           - AnnotationCheck
-                          - CheckLock
+                           - CheckLock
                           - ManualTouchCheck
+                          - ServicePodSelectorCheck
                       message:
                         description: >
                           Message is the human-readable denial message
@@ -379,6 +380,28 @@ spec:
                               ManualTouchEvent resources are stored. Defaults
                               to "early-watch-system" when omitted.
                             type: string
+                      checkLock:
+                        description: >
+                          CheckLock optionally configures the CheckLock rule.
+                          When omitted the rule applies only to DELETE
+                          operations (the default behavior).
+                        type: object
+                        properties:
+                          lockOnMutate:
+                            description: >
+                              LockOnMutate, when true, extends the lock check
+                              to UPDATE operations in addition to DELETE
+                              operations. When false or omitted the check only
+                              applies to DELETE requests.
+                            type: boolean
+                      servicePodSelectorCheck:
+                        description: >
+                          ServicePodSelectorCheck denies an UPDATE to a Service
+                          when the service previously selected at least one Pod
+                          but would select no Pods after the change. Headless
+                          services (spec.clusterIP == "None") are exempt.
+                          Required when type is ServicePodSelectorCheck.
+                        type: object
             status:
               description: ChangeValidatorStatus defines the observed state of ChangeValidator.
               type: object

@@ -23,6 +23,13 @@
 #     print_cmd    <text>   — print a command line (for display only)
 #     pause                 — wait for the user to press Enter
 #     run_cmd      <cmd…>   — print and then execute a command
+#
+#   EXIT trap (_on_exit):
+#     Keeps the terminal window open on both success and failure so the user
+#     can review all output before the shell closes.  On a non-zero exit it
+#     also prints an error message with the exit code.
+#     If the sourcing script defines a _pre_exit_cleanup() function it is
+#     called before the prompt (demo.sh uses this to run demo-teardown.sh).
 
 # ── ANSI color codes ─────────────────────────────────────────────────────────
 BOLD=$'\033[1m'
@@ -36,6 +43,8 @@ RESET=$'\033[0m'
 # ── Common paths ─────────────────────────────────────────────────────────────
 # shellcheck disable=SC2034  # used by the scripts that source this file
 CLUSTER_NAME="earlywatch-demo"
+# shellcheck disable=SC2034  # used by the scripts that source this file
+DEMO_NS="${DEMO_NS:-default}"
 # BASH_SOURCE[1] is the script that sourced this file; resolve from its directory.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[1]}")/.." && pwd)"
 # shellcheck disable=SC2034  # used by the scripts that source this file
@@ -77,14 +86,40 @@ pause() {
 }
 
 run_cmd() {
-  # Simulate typing the command character-by-character with random pauses.
   local cmd_str="$*"
   printf "%s   \$ " "${BOLD}"
-  for (( i=0; i<${#cmd_str}; i++ )); do
-    printf "%s" "${cmd_str:$i:1}"
-    # Random delay between 30 ms and 120 ms; zero-pad to 3 decimal places.
-    sleep "$(printf '0.%03d' $(( 30 + RANDOM % 91 )))"
-  done
+  if [[ "${SIMULATE_TYPING:-1}" == "1" ]]; then
+    # Simulate typing the command character-by-character with random pauses.
+    for (( i=0; i<${#cmd_str}; i++ )); do
+      printf "%s" "${cmd_str:$i:1}"
+      # Random delay between 30 ms and 120 ms; zero-pad to 3 decimal places.
+      sleep "$(printf '0.%03d' $(( 30 + RANDOM % 91 )))"
+    done
+  else
+    printf "%s" "${cmd_str}"
+  fi
   printf "%s\n" "${RESET}"
-  bash -c "$*"
+  "$@"
 }
+
+# ── EXIT trap — keep terminal open ───────────────────────────────────────────
+# Keeps the terminal open on both success and failure so the user can review
+# all output before the shell closes.
+# If the sourcing script defines _pre_exit_cleanup(), it is called first
+# (demo.sh uses this to invoke demo-teardown.sh before the prompt fires).
+_on_exit() {
+  local rc=$?
+  if declare -f _pre_exit_cleanup > /dev/null 2>&1; then
+    _pre_exit_cleanup
+  fi
+  if [ "$rc" -ne 0 ]; then
+    print_error "Script failed (exit code ${rc}). Review the output above."
+  fi
+  echo ""
+  echo -n "${DIM}   Press Enter to close...${RESET}"
+  read -r _
+}
+if [[ "${_EARLYWATCH_EXIT_TRAP_INSTALLED:-}" != "1" ]]; then
+  trap '_on_exit' EXIT
+  export _EARLYWATCH_EXIT_TRAP_INSTALLED=1
+fi

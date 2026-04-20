@@ -1,0 +1,25 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-name-reference-check
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""
+    resource: configmaps
+  operations:
+    - DELETE
+  rules:
+    - name: configmap-not-referenced
+      type: NameReferenceCheck
+      nameReferenceCheck:
+        sameNamespace: true
+        resources:
+          - apiGroup: apps
+            resource: deployments
+            version: v1
+            nameFields:
+              - spec.template.spec.volumes.configMap.name
+              - spec.template.spec.containers.envFrom.configMapRef.name
+      message: >
+        ConfigMap "{{name}}" cannot be deleted because a workload still references it.

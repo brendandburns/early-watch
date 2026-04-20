@@ -48,6 +48,42 @@ See [docs/getting-started.md](docs/getting-started.md) for a full walkthrough.
 
 ## Documentation
 
+### Change Validator Summaries
+
+| Validator Type | Summary | Sample YAML |
+|-------|------|------|
+| `ExistingResources` | Denies a request when dependent resources still exist (for example, matching Pods behind a Service). | [docs/examples/existing-resources.yaml](docs/examples/existing-resources.yaml) |
+| `NameReferenceCheck` | Denies a request when the subject is still referenced by name in other resources. | [docs/examples/name-reference-check.yaml](docs/examples/name-reference-check.yaml) |
+| `AnnotationCheck` | Denies a request unless a required annotation (optionally with a required value) is present. | [docs/examples/annotation-check.yaml](docs/examples/annotation-check.yaml) |
+| `ApprovalCheck` | Denies a request unless the resource carries a valid RSA-PSS approval signature annotation. | [docs/examples/approval-check.yaml](docs/examples/approval-check.yaml) |
+| `CheckLock` | Denies DELETE (and optionally UPDATE) when `earlywatch.io/lock` is set with a non-empty value. | [docs/examples/check-lock.yaml](docs/examples/check-lock.yaml) |
+| `ExpressionCheck` | Denies a request when a configured expression against operation/namespace/name evaluates to true. | [docs/examples/expression-check.yaml](docs/examples/expression-check.yaml) |
+| `ManualTouchCheck` | Denies a request when a recent manual touch event exists within the configured time window. | [docs/examples/manual-touch-check.yaml](docs/examples/manual-touch-check.yaml) |
+| `ServicePodSelectorCheck` | Denies a Service UPDATE when the old selector matched Pods but the new selector would match none. | [docs/examples/service-pod-selector-check.yaml](docs/examples/service-pod-selector-check.yaml) |
+
+---
+
+### Interactive Demo Matrix
+
+Run a specific validator demo with:
+
+```bash
+bash scripts/demo.sh --demos=<key>
+```
+
+| Validator Type | Demo Key (`--demos`) | Demo Script |
+|-------|------|------|
+| `ExistingResources` | `service` | `scripts/demo-service.sh` |
+| `NameReferenceCheck` | `configmap` | `scripts/demo-configmap.sh` |
+| `AnnotationCheck` | `annotation` | `scripts/demo-annotation-check.sh` |
+| `ApprovalCheck` | `approval` | `scripts/demo-approval-check.sh` |
+| `CheckLock` | `checklock` | `scripts/demo-check-lock.sh` |
+| `ExpressionCheck` | `expression` | `scripts/demo-expression-check.sh` |
+| `ManualTouchCheck` | `manualtouch` | `scripts/demo-manual-touch-check.sh` |
+| `ServicePodSelectorCheck` | `servicepodselector` | `scripts/demo-service-pod-selector-check.sh` |
+
+---
+
 | Topic | Link |
 |-------|------|
 | Getting started | [docs/getting-started.md](docs/getting-started.md) |

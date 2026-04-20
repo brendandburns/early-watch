@@ -1501,7 +1501,7 @@ func TestEvaluateCheckLock_AllowedWhenAnnotationEmpty(t *testing.T) {
 	}
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1516,7 +1516,7 @@ func TestEvaluateCheckLock_DeniedWhenAnnotationPresent(t *testing.T) {
 	obj := lockedServiceObj("my-svc", "default")
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
 
-	violated, msg, err := evaluateCheckLock("resource is locked", req)
+	violated, msg, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1541,7 +1541,7 @@ func TestEvaluateCheckLock_AllowedWhenAnnotationAbsent(t *testing.T) {
 	}
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", obj)
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1550,9 +1550,9 @@ func TestEvaluateCheckLock_AllowedWhenAnnotationAbsent(t *testing.T) {
 	}
 }
 
-// TestEvaluateCheckLock_AllowedForNonDeleteOperation verifies that non-DELETE
-// operations are never blocked by the CheckLock rule.
-func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
+// TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateNotSet verifies that an
+// UPDATE operation is not blocked when LockOnMutate is not configured.
+func TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateNotSet(t *testing.T) {
 	obj := lockedServiceObj("my-svc", "default")
 	raw, _ := json.Marshal(obj)
 	req := admission.Request{
@@ -1561,16 +1561,78 @@ func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
 			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
 			Namespace: "default",
 			Name:      "my-svc",
-			Object:    runtime.RawExtension{Raw: raw},
+			OldObject: runtime.RawExtension{Raw: raw},
 		},
 	}
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if violated {
-		t.Error("expected CheckLock NOT to be violated for a non-DELETE operation")
+		t.Error("expected CheckLock NOT to be violated for UPDATE when LockOnMutate is not set")
+	}
+}
+
+// TestEvaluateCheckLock_DeniedForUpdateWhenLockOnMutateTrue verifies that an
+// UPDATE request is denied when LockOnMutate is true and the object is locked.
+func TestEvaluateCheckLock_DeniedForUpdateWhenLockOnMutateTrue(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	obj := lockedServiceObj("my-svc", "default")
+	raw, _ := json.Marshal(obj)
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	violated, msg, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected CheckLock to be violated for UPDATE when LockOnMutate is true and lock annotation is set")
+	}
+	if msg != "resource is locked" {
+		t.Errorf("unexpected message: %q", msg)
+	}
+}
+
+// TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateTrueButNotLocked verifies
+// that an UPDATE request is allowed when LockOnMutate is true but the object
+// does not carry the lock annotation.
+func TestEvaluateCheckLock_AllowedForUpdateWhenLockOnMutateTrueButNotLocked(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+	}
+	raw, _ := json.Marshal(obj)
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: raw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated for UPDATE when LockOnMutate is true but lock annotation is absent")
 	}
 }
 
@@ -1579,12 +1641,108 @@ func TestEvaluateCheckLock_AllowedForNonDeleteOperation(t *testing.T) {
 func TestEvaluateCheckLock_AllowedWhenNoObjectData(t *testing.T) {
 	req := makeDeleteRequestNS("", "services", "default", "my-svc", nil)
 
-	violated, _, err := evaluateCheckLock("resource is locked", req)
+	violated, _, err := evaluateCheckLock(nil, "resource is locked", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if violated {
 		t.Error("expected CheckLock NOT to be violated when no object data is present")
+	}
+}
+
+// TestEvaluateCheckLock_AllowedForUpdateThatOnlyRemovesLock verifies that an
+// UPDATE whose only change is removing the earlywatch.io/lock annotation is
+// allowed even when LockOnMutate is true.  This is the "unlock" path that
+// operators rely on to release a locked resource.
+func TestEvaluateCheckLock_AllowedForUpdateThatOnlyRemovesLock(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	// Old object is locked.
+	oldObj := lockedServiceObj("my-svc", "default")
+	// New object is identical except the lock annotation has been removed.
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	oldRaw, err := json.Marshal(oldObj)
+	if err != nil {
+		t.Fatalf("marshaling old object: %v", err)
+	}
+	newRaw, err := json.Marshal(newObj)
+	if err != nil {
+		t.Fatalf("marshaling new object: %v", err)
+	}
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: oldRaw},
+			Object:    runtime.RawExtension{Raw: newRaw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected CheckLock NOT to be violated when the only change is removing the lock annotation")
+	}
+}
+
+// TestEvaluateCheckLock_DeniedForUpdateThatChangesMoreThanLock verifies that
+// an UPDATE which removes the lock annotation AND changes other fields is
+// still denied.
+func TestEvaluateCheckLock_DeniedForUpdateThatChangesMoreThanLock(t *testing.T) {
+	lockOnMutate := true
+	cfg := &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate}
+
+	// Old object is locked.
+	oldObj := lockedServiceObj("my-svc", "default")
+	// New object removes the lock but also changes another field (spec).
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{
+			"clusterIP": "10.0.0.2",
+		},
+	}
+	oldRaw, err := json.Marshal(oldObj)
+	if err != nil {
+		t.Fatalf("marshaling old object: %v", err)
+	}
+	newRaw, err := json.Marshal(newObj)
+	if err != nil {
+		t.Fatalf("marshaling new object: %v", err)
+	}
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
+			Namespace: "default",
+			Name:      "my-svc",
+			OldObject: runtime.RawExtension{Raw: oldRaw},
+			Object:    runtime.RawExtension{Raw: newRaw},
+		},
+	}
+
+	violated, _, err := evaluateCheckLock(cfg, "resource is locked", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected CheckLock to be violated when the UPDATE changes fields beyond the lock annotation")
 	}
 }
 
@@ -1700,6 +1858,195 @@ func TestHandle_CheckLock_AllowedWhenNotLocked(t *testing.T) {
 	resp := h.Handle(context.Background(), req)
 	if !resp.Allowed {
 		t.Errorf("expected DELETE to be allowed when no lock annotation is set: %v", resp.Result)
+	}
+}
+
+// makeUpdateRequest builds an admission.Request for an UPDATE operation,
+// placing the pre-update object in OldObject.
+func makeUpdateRequest(group, resource, namespace, name string, oldObj interface{}) admission.Request {
+	var rawOld []byte
+	if oldObj != nil {
+		var err error
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+		},
+	}
+}
+
+// makeUpdateRequestFull builds an admission.Request for an UPDATE operation
+// with both OldObject (pre-update) and Object (post-update) populated.
+func makeUpdateRequestFull(group, resource, namespace, name string, oldObj, newObj interface{}) admission.Request {
+	var rawOld, rawNew []byte
+	if oldObj != nil {
+		var err error
+		rawOld, err = json.Marshal(oldObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	if newObj != nil {
+		var err error
+		rawNew, err = json.Marshal(newObj)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			Operation: admissionv1.Update,
+			Resource: metav1.GroupVersionResource{
+				Group:    group,
+				Version:  "v1",
+				Resource: resource,
+			},
+			Namespace: namespace,
+			Name:      name,
+			OldObject: runtime.RawExtension{Raw: rawOld},
+			Object:    runtime.RawExtension{Raw: rawNew},
+		},
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_DeniedWhenLocked verifies the full
+// admission pipeline rejects an UPDATE when LockOnMutate is true and the
+// current resource carries the lock annotation.
+func TestHandle_CheckLock_LockOnMutate_DeniedWhenLocked(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// Old (locked) and new objects both with the lock (not an unlock attempt).
+	oldObj := lockedServiceObj("my-svc", "default")
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+			"annotations": map[string]interface{}{
+				ewv1alpha1.LockAnnotation: "true",
+			},
+		},
+		"spec": map[string]interface{}{
+			"clusterIP": "10.0.0.2",
+		},
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldObj, newObj)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because the service carries the lock annotation and LockOnMutate is true")
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_AllowedWhenNotLocked verifies that an
+// UPDATE is allowed when LockOnMutate is true but the object is not locked.
+func TestHandle_CheckLock_LockOnMutate_AllowedWhenNotLocked(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+	}
+	req := makeUpdateRequest("", "services", "default", "my-svc", obj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when no lock annotation is set: %v", resp.Result)
+	}
+}
+
+// TestHandle_CheckLock_LockOnMutate_AllowedWhenUnlocking verifies that an
+// UPDATE that removes the lock annotation (and changes nothing else) is
+// allowed even when LockOnMutate is true.
+func TestHandle_CheckLock_LockOnMutate_AllowedWhenUnlocking(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	lockOnMutate := true
+	guard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "lock-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:      "check-lock",
+					Type:      ewv1alpha1.RuleTypeCheckLock,
+					Message:   "service is locked and cannot be mutated",
+					CheckLock: &ewv1alpha1.CheckLockRule{LockOnMutate: &lockOnMutate},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// Old object carries the lock; new object is identical except the lock is removed.
+	oldObj := lockedServiceObj("my-svc", "default")
+	newObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata": map[string]interface{}{
+			"name":      "my-svc",
+			"namespace": "default",
+		},
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldObj, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when the only change is removing the lock annotation: %v", resp.Result)
 	}
 }
 
@@ -1904,5 +2251,849 @@ func TestEvaluateManualTouchCheck_InvalidWindowDuration(t *testing.T) {
 	_, _, err := h.evaluateManualTouchCheck(context.Background(), check, "msg", req)
 	if err == nil {
 		t.Error("expected error for invalid window duration")
+	}
+}
+
+// --- DataKeySafetyCheck tests ---
+
+// configMapObj builds a minimal ConfigMap-like map with the given data keys.
+func configMapObj(name, namespace string, data map[string]string) map[string]interface{} {
+	d := make(map[string]interface{}, len(data))
+	for k, v := range data {
+		d[k] = v
+	}
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]interface{}{"name": name, "namespace": namespace},
+		"data":       d,
+	}
+}
+
+// newConfigMapKeySafetyGuard returns a ChangeValidator that prevents removal
+// of ConfigMap keys that are still referenced via configMapKeyRef in Deployments.
+func newConfigMapKeySafetyGuard() *ewv1alpha1.ChangeValidator {
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-cm-keys", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "configmaps",
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-key-removal-while-in-use",
+					Type:    ewv1alpha1.RuleTypeDataKeySafetyCheck,
+					Message: "ConfigMap key is still in use",
+					DataKeySafetyCheck: &ewv1alpha1.DataKeySafetyCheck{
+						Resources: []ewv1alpha1.DataKeyReferenceResource{
+							{
+								APIGroup: "apps",
+								Resource: "deployments",
+								Version:  "v1",
+								KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+									{
+										RefPath: "spec.template.spec.containers.env.valueFrom.configMapKeyRef",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// --- ServicePodSelectorCheck tests ---
+
+// serviceObj builds a minimal Service JSON object for use in admission requests.
+// selector may be nil (no selector). clusterIP may be empty (uses default) or
+// "None" (headless).
+func serviceObj(selector map[string]string, clusterIP string) map[string]interface{} {
+	spec := map[string]interface{}{}
+	if selector != nil {
+		sel := make(map[string]interface{}, len(selector))
+		for k, v := range selector {
+			sel[k] = v
+		}
+		spec["selector"] = sel
+	}
+	if clusterIP != "" {
+		spec["clusterIP"] = clusterIP
+	}
+	return map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]interface{}{"name": "my-svc", "namespace": "default"},
+		"spec":       spec,
+	}
+}
+
+// newServicePodSelectorGuard builds a ChangeValidator that uses the
+// ServicePodSelectorCheck rule to protect Service UPDATE operations.
+func newServicePodSelectorGuard() *ewv1alpha1.ChangeValidator {
+	return &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-svc-selector", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:                    "service-must-keep-pods",
+					Type:                    ewv1alpha1.RuleTypeServicePodSelectorCheck,
+					Message:                 "service selector change would leave no matching pods",
+					ServicePodSelectorCheck: &ewv1alpha1.ServicePodSelectorCheck{},
+				},
+			},
+		},
+	}
+}
+
+// TestEvaluateRule_NilDataKeySafetyCheck verifies that evaluateRule returns an
+// error when DataKeySafetyCheck is the type but the config pointer is nil.
+func TestEvaluateRule_NilDataKeySafetyCheck(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	rule := ewv1alpha1.GuardRule{
+		Name:               "bad-rule",
+		Type:               ewv1alpha1.RuleTypeDataKeySafetyCheck,
+		Message:            "msg",
+		DataKeySafetyCheck: nil,
+	}
+	req := makeUpdateRequestFull("", "configmaps", "default", "my-cm",
+		configMapObj("my-cm", "default", map[string]string{"key": "val"}),
+		configMapObj("my-cm", "default", map[string]string{}),
+	)
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil DataKeySafetyCheck config")
+	}
+}
+
+// TestEvaluateDataKeySafetyCheck_NotUpdate verifies that non-UPDATE operations
+// are always allowed.
+func TestEvaluateDataKeySafetyCheck_NotUpdate(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	check := ewv1alpha1.DataKeySafetyCheck{
+		Resources: []ewv1alpha1.DataKeyReferenceResource{
+			{APIGroup: "apps", Resource: "deployments", Version: "v1",
+				KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+					{RefPath: "spec.template.spec.containers.env.valueFrom.configMapKeyRef"},
+				},
+			},
+		},
+	}
+	// DELETE, not UPDATE.
+	req := makeDeleteRequest("", "configmaps", "my-cm",
+		configMapObj("my-cm", "default", map[string]string{"k": "v"}))
+
+	violated, _, err := h.evaluateDataKeySafetyCheck(context.Background(), check, "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected DataKeySafetyCheck NOT to be violated for a non-UPDATE operation")
+	}
+}
+
+// TestEvaluateDataKeySafetyCheck_NoRemovedKeys verifies that the check is not
+// violated when no data keys are removed.
+func TestEvaluateDataKeySafetyCheck_NoRemovedKeys(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	check := ewv1alpha1.DataKeySafetyCheck{
+		Resources: []ewv1alpha1.DataKeyReferenceResource{
+			{APIGroup: "apps", Resource: "deployments", Version: "v1",
+				KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+					{RefPath: "spec.template.spec.containers.env.valueFrom.configMapKeyRef"},
+				},
+			},
+		},
+	}
+	old := configMapObj("my-cm", "default", map[string]string{"key1": "v1"})
+	// Same key, just value changed – no removal.
+	newObj := configMapObj("my-cm", "default", map[string]string{"key1": "v2"})
+	req := makeUpdateRequestFull("", "configmaps", "default", "my-cm", old, newObj)
+
+	violated, _, err := h.evaluateDataKeySafetyCheck(context.Background(), check, "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected DataKeySafetyCheck NOT to be violated when no keys are removed")
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_DeniedWhenKeyReferencedViaConfigMapKeyRef verifies
+// that removing a ConfigMap key still referenced by a Deployment's configMapKeyRef
+// is denied.
+func TestHandle_DataKeySafetyCheck_DeniedWhenKeyReferencedViaConfigMapKeyRef(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "DB_HOST",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "my-cm"},
+											Key:                  "db-host",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapKeySafetyGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	old := configMapObj("my-cm", "default", map[string]string{"db-host": "localhost"})
+	// Remove the "db-host" key.
+	newObj := configMapObj("my-cm", "default", map[string]string{})
+	req := makeUpdateRequestFull("", "configmaps", "default", "my-cm", old, newObj)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because a Deployment references the removed key via configMapKeyRef")
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_AllowedWhenKeyNotReferenced verifies that
+// removing a ConfigMap key that is not referenced by any workload is allowed.
+func TestHandle_DataKeySafetyCheck_AllowedWhenKeyNotReferenced(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	// Deployment references a different key ("other-key"), not "db-host".
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "OTHER",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "my-cm"},
+											Key:                  "other-key",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	guard := newConfigMapKeySafetyGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	old := configMapObj("my-cm", "default", map[string]string{"db-host": "localhost", "other-key": "v"})
+	// Remove only "db-host"; "other-key" stays.
+	newObj := configMapObj("my-cm", "default", map[string]string{"other-key": "v"})
+	req := makeUpdateRequestFull("", "configmaps", "default", "my-cm", old, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when the removed key is not referenced: %v", resp.Result)
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_AllowedWhenNoWorkloads verifies that a key
+// removal is allowed when no dependent workloads exist.
+func TestHandle_DataKeySafetyCheck_AllowedWhenNoWorkloads(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	guard := newConfigMapKeySafetyGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no workloads
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	old := configMapObj("my-cm", "default", map[string]string{"key": "val"})
+	newObj := configMapObj("my-cm", "default", map[string]string{})
+	req := makeUpdateRequestFull("", "configmaps", "default", "my-cm", old, newObj)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected UPDATE to be allowed when no workloads exist: %v", resp.Result)
+	}
+}
+
+// TestHandle_DataKeySafetyCheck_DeniedWhenSecretKeyReferenced verifies that
+// removing a Secret key still referenced by a Deployment's secretKeyRef is denied.
+func TestHandle_DataKeySafetyCheck_DeniedWhenSecretKeyReferenced(t *testing.T) {
+	scheme := newFullHandlerScheme(t)
+	deploy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-deploy", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "test"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "test"}},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "app",
+							Image: "app:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "MY_SECRET",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{Name: "my-secret"},
+											Key:                  "password",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	secretGuard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "protect-secret-keys", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "secrets",
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "no-key-removal-while-in-use",
+					Type:    ewv1alpha1.RuleTypeDataKeySafetyCheck,
+					Message: "Secret key is still in use",
+					DataKeySafetyCheck: &ewv1alpha1.DataKeySafetyCheck{
+						Resources: []ewv1alpha1.DataKeyReferenceResource{
+							{
+								APIGroup: "apps",
+								Resource: "deployments",
+								Version:  "v1",
+								KeyReferenceFields: []ewv1alpha1.KeyReferenceField{
+									{
+										RefPath: "spec.template.spec.containers.env.valueFrom.secretKeyRef",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(secretGuard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, deploy)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSecret := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]interface{}{"name": "my-secret", "namespace": "default"},
+		"data":       map[string]interface{}{"password": "c2VjcmV0"},
+	}
+	newSecret := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]interface{}{"name": "my-secret", "namespace": "default"},
+		"data":       map[string]interface{}{},
+	}
+	req := makeUpdateRequestFull("", "secrets", "default", "my-secret", oldSecret, newSecret)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected UPDATE to be denied because a Deployment references the removed Secret key via secretKeyRef")
+	}
+}
+
+// TestKeyReferenceExistsAtPath_SimpleMatch verifies that the function finds a
+// matching name+key pair at a simple dot path.
+func TestKeyReferenceExistsAtPath_SimpleMatch(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"ref": map[string]interface{}{
+				"name": "my-cm",
+				"key":  "my-key",
+			},
+		},
+	}
+	if !keyReferenceExistsAtPath(obj, []string{"spec", "ref"}, "my-cm", "my-key", "name", "key") {
+		t.Error("expected match to be found at simple path")
+	}
+}
+
+// TestKeyReferenceExistsAtPath_NoMatch verifies no match when values differ.
+func TestKeyReferenceExistsAtPath_NoMatch(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"ref": map[string]interface{}{
+				"name": "my-cm",
+				"key":  "other-key",
+			},
+		},
+	}
+	if keyReferenceExistsAtPath(obj, []string{"spec", "ref"}, "my-cm", "my-key", "name", "key") {
+		t.Error("expected no match when key field differs")
+	}
+}
+
+// TestKeyReferenceExistsAtPath_TraversesArrays verifies that arrays along the
+// path are traversed automatically.
+func TestKeyReferenceExistsAtPath_TraversesArrays(t *testing.T) {
+	obj := map[string]interface{}{
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"env": []interface{}{
+						map[string]interface{}{
+							"valueFrom": map[string]interface{}{
+								"configMapKeyRef": map[string]interface{}{
+									"name": "my-cm",
+									"key":  "db-host",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	parts := []string{"spec", "containers", "env", "valueFrom", "configMapKeyRef"}
+	if !keyReferenceExistsAtPath(obj, parts, "my-cm", "db-host", "name", "key") {
+		t.Error("expected match via nested array traversal")
+	}
+}
+
+// TestDataKeysFromRaw_DataField verifies that keys from the "data" field are
+// returned.
+func TestDataKeysFromRaw_DataField(t *testing.T) {
+	cm := configMapObj("cm", "default", map[string]string{"key1": "v1", "key2": "v2"})
+	raw, _ := json.Marshal(cm)
+
+	keys, err := dataKeysFromRaw(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, k := range []string{"key1", "key2"} {
+		if _, ok := keys[k]; !ok {
+			t.Errorf("expected key %q to be present", k)
+		}
+	}
+}
+
+// TestDataKeysFromRaw_BinaryDataField verifies that keys from the "binaryData"
+// field are returned.
+func TestDataKeysFromRaw_BinaryDataField(t *testing.T) {
+	obj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata":   map[string]interface{}{"name": "s", "namespace": "default"},
+		"binaryData": map[string]interface{}{"bin-key": "aGVsbG8="},
+	}
+	raw, _ := json.Marshal(obj)
+
+	keys, err := dataKeysFromRaw(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := keys["bin-key"]; !ok {
+		t.Error("expected bin-key from binaryData to be present")
+	}
+}
+
+// TestDataKeysFromRaw_EmptyData verifies that an empty data map returns an
+// empty key set without error.
+func TestDataKeysFromRaw_EmptyData(t *testing.T) {
+	cm := configMapObj("cm", "default", map[string]string{})
+	raw, _ := json.Marshal(cm)
+
+	keys, err := dataKeysFromRaw(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected empty key set, got %v", keys)
+	}
+}
+
+// TestEvaluateRule_NilServicePodSelectorCheck verifies that a nil config
+// returns an error.
+func TestEvaluateRule_NilServicePodSelectorCheck(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	rule := ewv1alpha1.GuardRule{
+		Name:                    "bad-rule",
+		Type:                    ewv1alpha1.RuleTypeServicePodSelectorCheck,
+		Message:                 "msg",
+		ServicePodSelectorCheck: nil,
+	}
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", serviceObj(nil, ""), serviceObj(nil, ""))
+	_, _, err := h.evaluateRule(context.Background(), rule, req)
+	if err == nil {
+		t.Error("expected error for nil ServicePodSelectorCheck config")
+	}
+}
+
+// TestServicePodSelectorCheck_NonUpdateAllowed verifies that non-UPDATE
+// operations are always allowed.
+func TestServicePodSelectorCheck_NonUpdateAllowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// DELETE should be a no-op for this check.
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected non-UPDATE operation to be allowed")
+	}
+}
+
+// TestServicePodSelectorCheck_OldNoSelector_Allowed verifies that a service
+// with no selector (cannot select pods) is allowed to be modified.
+func TestServicePodSelectorCheck_OldNoSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(nil, "")
+	newSvc := serviceObj(map[string]string{"app": "other"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected service with no old selector to be allowed")
+	}
+}
+
+// TestServicePodSelectorCheck_HeadlessNoSelector_Allowed verifies that a
+// headless service (clusterIP=None) without a selector is exempt.
+func TestServicePodSelectorCheck_HeadlessNoSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(nil, "None")
+	newSvc := serviceObj(map[string]string{"app": "other"}, "10.0.0.1")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected headless service without selector to be exempt")
+	}
+}
+
+// TestServicePodSelectorCheck_HeadlessWithSelector_Allowed verifies that a
+// headless service (clusterIP=None) with a selector and matching pods is still
+// exempt from this check.
+func TestServicePodSelectorCheck_HeadlessWithSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// Headless service with a selector that matches a pod; change would drop pods.
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "None")
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "None")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected headless service (clusterIP=None) to be exempt even when selector change would drop pods")
+	}
+}
+
+// TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied
+// verifies that a service with spec.selector: {} (matches all pods) is denied
+// when the new selector would match no pods.
+func TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// spec.selector: {} matches all pods (including my-pod above).
+	oldSvc := serviceObj(map[string]string{}, "")
+	// New selector has no matching pods.
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected change to be denied: old empty-selector matched all pods but new selector matches none")
+	}
+}
+
+// TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed verifies
+// that changing to spec.selector: {} (matches all pods) is allowed when pods exist.
+func TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// Old service selected a specific app.
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	// New service uses spec.selector: {} which matches all pods.
+	newSvc := serviceObj(map[string]string{}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected change to be allowed: new empty-selector {} matches all pods")
+	}
+}
+
+// TestServicePodSelectorCheck_OldNoPods_Allowed verifies that when the old
+// service had a selector but no matching pods, the change is allowed.
+func TestServicePodSelectorCheck_OldNoPods_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no pods
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected service with no old matching pods to be allowed")
+	}
+}
+
+// TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed verifies that
+// when the new service also selects pods, the change is allowed.
+func TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	// Old and new service both select the same pod.
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected change to be allowed when new service still has matching pods")
+	}
+}
+
+// TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied verifies that
+// removing the selector is denied when the old service had matching pods.
+func TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(nil, "") // selector removed
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, msg, err := h.evaluateServicePodSelectorCheck(context.Background(), "selector change denied", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected change to be denied when new service has no selector but old had pods")
+	}
+	if msg != "selector change denied" {
+		t.Errorf("unexpected message: %q", msg)
+	}
+}
+
+// TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied verifies that
+// changing the selector so no pods match is denied when the old service had pods.
+func TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "") // different selector, no pods
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !violated {
+		t.Error("expected change to be denied when new selector matches no pods but old had pods")
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_Denied is an integration test that verifies
+// the full Handle path denies a Service UPDATE that would drop all pod references.
+func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	guard := newServicePodSelectorGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "no-such-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected Handle to deny service UPDATE that drops all pod references")
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_Allowed verifies that a Service UPDATE
+// which keeps matching pods is allowed.
+func TestHandle_ServicePodSelectorCheck_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"app": "my-app"},
+		},
+	}
+	guard := newServicePodSelectorGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected Handle to allow service UPDATE that retains pod references: %v", resp.Result)
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_NoPreviousPods_Allowed verifies that a
+// Service UPDATE is allowed when the old service had no matching pods.
+func TestHandle_ServicePodSelectorCheck_NoPreviousPods_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	guard := newServicePodSelectorGuard()
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme) // no pods
+
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected Handle to allow service UPDATE when old service had no matching pods: %v", resp.Result)
 	}
 }

@@ -24,13 +24,31 @@ import (
 //go:embed manifests
 var manifestsFS embed.FS
 
+// Version is the current release of EarlyWatch. It is set at build time via:
+//
+//	go build -ldflags "-X github.com/brendandburns/early-watch/pkg/install.Version=<git-tag>" ./cmd/watchctl
+//
+// When built without the flag the value defaults to "latest".
+var Version = "latest"
+
+// webhookImagePlaceholder is the stable token embedded in the webhook YAML
+// manifests. It is replaced with the actual image at apply time so that the
+// YAML files do not need to change with every release.
+const webhookImagePlaceholder = "early-watch:IMAGE_TAG"
+
+// auditMonitorImagePlaceholder is the stable token embedded in the
+// audit-monitor YAML manifests.
+const auditMonitorImagePlaceholder = "early-watch-audit-monitor:IMAGE_TAG"
+
 // defaultWebhookImage is the container image used by the webhook Deployment
-// when no override is provided.
-const defaultWebhookImage = "early-watch:latest"
+// when no override is provided. It is derived from Version and matches the
+// published registry path used by the CLI and documentation.
+var defaultWebhookImage = "ghcr.io/brendandburns/early-watch/webhook:" + Version
 
 // defaultAuditMonitorImage is the container image used by the audit-monitor
-// Deployment when no override is provided.
-const defaultAuditMonitorImage = "early-watch-audit-monitor:latest"
+// Deployment when no override is provided. It is derived from Version and
+// matches the published registry path used by the CLI and documentation.
+var defaultAuditMonitorImage = "ghcr.io/brendandburns/early-watch/audit-monitor:" + Version
 
 // defaultNamespace is the Kubernetes namespace used for EarlyWatch resources
 // when no override is provided via Options.Namespace.
@@ -122,8 +140,8 @@ func Run(opts Options) error {
 
 	// Apply core manifests in order: CRD first, then RBAC, then webhook resources.
 	replacements := map[string]string{
-		defaultWebhookImage: opts.Image,
-		defaultNamespace:    opts.Namespace,
+		webhookImagePlaceholder: opts.Image,
+		defaultNamespace:        opts.Namespace,
 	}
 
 	// Build the manifest mutator. It always stamps the managed-by annotation,
@@ -147,8 +165,8 @@ func Run(opts Options) error {
 	// Optionally apply manual touch monitoring manifests.
 	if opts.ManualTouchInstall {
 		mtReplacements := map[string]string{
-			defaultAuditMonitorImage: opts.AuditMonitorImage,
-			defaultNamespace:         opts.Namespace,
+			auditMonitorImagePlaceholder: opts.AuditMonitorImage,
+			defaultNamespace:             opts.Namespace,
 		}
 		mtMutator := func(obj *unstructured.Unstructured) {
 			stampManagedBy(obj)
