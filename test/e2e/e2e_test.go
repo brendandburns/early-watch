@@ -25,6 +25,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net"
@@ -51,6 +52,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
+	ewapprove "github.com/brendandburns/early-watch/pkg/approve"
 	ewinstall "github.com/brendandburns/early-watch/pkg/install"
 	ewwebhook "github.com/brendandburns/early-watch/pkg/webhook"
 )
@@ -696,6 +698,367 @@ func TestApprovalCheck_DeleteDeniedWithWrongKey(t *testing.T) {
 	}
 	if !kerrors.IsForbidden(err) {
 		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// --- change-approval (UPDATE) helpers and tests ---
+
+// approveChangeConfigMap prepares a ConfigMap ready for an approved UPDATE.
+// It fetches the current resource state, builds a new ConfigMap with newData,
+// computes the normalised JSON merge patch (stripping the approval annotation),
+// signs it with privKey, embeds the base64-encoded signature as annotationKey
+// on the new object, and returns the annotated ConfigMap.
+//
+// The caller should pass the returned ConfigMap directly to k8sClient.Update.
+func approveChangeConfigMap(t *testing.T, privKey *rsa.PrivateKey, annotationKey, namespace, name string, newData map[string]string) *corev1.ConfigMap {
+	t.Helper()
+
+	// Fetch the current resource (old state).
+	old := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, old); err != nil {
+		t.Fatalf("Get ConfigMap %q: %v", name, err)
+	}
+
+	// Build the desired new state.
+	newCM := old.DeepCopy()
+	newCM.Data = newData
+
+	// Marshal both states to JSON so that approve.NewObject can compute and
+	// sign the normalized merge patch.
+	oldJSON, err := json.Marshal(old)
+	if err != nil {
+		t.Fatalf("marshal old ConfigMap: %v", err)
+	}
+	newJSON, err := json.Marshal(newCM)
+	if err != nil {
+		t.Fatalf("marshal new ConfigMap: %v", err)
+	}
+
+	// Compute the patch, sign it, and embed the annotation into the new object.
+	annotatedJSON, err := ewapprove.NewObject(privKey, oldJSON, newJSON, annotationKey)
+	if err != nil {
+		t.Fatalf("approve.NewObject: %v", err)
+	}
+
+	// Extract just the annotation value from the signed JSON and set it on
+	// the typed ConfigMap so that k8sClient.Update serialises it correctly.
+	var signedObj map[string]interface{}
+	if err := json.Unmarshal(annotatedJSON, &signedObj); err != nil {
+		t.Fatalf("unmarshal signed object: %v", err)
+	}
+	metadata, ok := signedObj["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("signed object has no metadata map")
+	}
+	annotations, ok := metadata["annotations"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("signed object metadata has no annotations map")
+	}
+	sig, ok := annotations[annotationKey].(string)
+	if !ok || sig == "" {
+		t.Fatalf("signed object is missing annotation %q", annotationKey)
+	}
+
+	if newCM.Annotations == nil {
+		newCM.Annotations = map[string]string{}
+	}
+	newCM.Annotations[annotationKey] = sig
+
+	return newCM
+}
+
+// TestApprovalCheck_UpdateDeniedWithoutChangeAnnotation verifies that an
+// ApprovalCheck guard blocks a ConfigMap UPDATE when the incoming object does
+// not carry the change-approval annotation.
+func TestApprovalCheck_UpdateDeniedWithoutChangeAnnotation(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	_, pubPEM := generateKeyPair(t)
+
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "require-change-approval"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "check-change-approval",
+				Type:    ewv1alpha1.RuleTypeApprovalCheck,
+				Message: "update requires change approval annotation",
+				ApprovalCheck: &ewv1alpha1.ApprovalCheck{
+					PublicKey: pubPEM,
+				},
+			}},
+		},
+	})
+
+	makeConfigMap(t, "change-unapproved-cm")
+
+	// Fetch a fresh copy and attempt to update without the change-approval annotation.
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "change-unapproved-cm"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap: %v", err)
+	}
+	if fresh.Data == nil {
+		fresh.Data = map[string]string{}
+	}
+	fresh.Data["extra-key"] = "extra-value"
+	err := k8sClient.Update(context.Background(), fresh)
+	if err == nil {
+		t.Fatal("expected UPDATE to be denied because no change-approval annotation is present")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// TestApprovalCheck_UpdateAllowedWithValidChangeAnnotation verifies the full
+// change-approval flow: the initial UPDATE is denied, then the approve tool
+// logic computes and signs the merge patch and annotates the new resource, and
+// the subsequent UPDATE with the annotation succeeds.
+func TestApprovalCheck_UpdateAllowedWithValidChangeAnnotation(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	privKey, pubPEM := generateKeyPair(t)
+	const annotationKey = ewapprove.DefaultChangeApprovalAnnotation
+
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "require-change-approval-full"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "check-change-approval",
+				Type:    ewv1alpha1.RuleTypeApprovalCheck,
+				Message: "update requires change approval",
+				ApprovalCheck: &ewv1alpha1.ApprovalCheck{
+					PublicKey:           pubPEM,
+					ChangeAnnotationKey: annotationKey,
+				},
+			}},
+		},
+	})
+
+	makeConfigMap(t, "change-approved-cm")
+
+	// Step 1: UPDATE without annotation must be denied.
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "change-approved-cm"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap: %v", err)
+	}
+	if fresh.Data == nil {
+		fresh.Data = map[string]string{}
+	}
+	fresh.Data["extra-key"] = "extra-value"
+	err := k8sClient.Update(context.Background(), fresh)
+	if err == nil {
+		t.Fatal("expected initial UPDATE to be denied because change-approval annotation is absent")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+
+	// Step 2: Prepare the approved new state: sign the merge patch and embed
+	// the change-approval annotation.
+	newData := map[string]string{"key": "value", "extra-key": "extra-value"}
+	approvedCM := approveChangeConfigMap(t, privKey, annotationKey, testNamespace, "change-approved-cm", newData)
+
+	// Step 3: UPDATE with the change-approval annotation must now be allowed.
+	if err := k8sClient.Update(context.Background(), approvedCM); err != nil {
+		t.Fatalf("expected UPDATE to succeed after change-approval annotation was set: %v", err)
+	}
+}
+
+// TestApprovalCheck_UpdateDeniedWithWrongKeyForChange verifies that a ConfigMap
+// UPDATE is denied when the change-approval annotation was signed with a
+// different private key than the one configured in the rule.
+func TestApprovalCheck_UpdateDeniedWithWrongKeyForChange(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	privKey1, _ := generateKeyPair(t)
+	_, pubPEM2 := generateKeyPair(t) // different key pair
+
+	const annotationKey = ewapprove.DefaultChangeApprovalAnnotation
+
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "require-change-approval-wrong-key"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "check-change-approval",
+				Type:    ewv1alpha1.RuleTypeApprovalCheck,
+				Message: "update requires change approval",
+				ApprovalCheck: &ewv1alpha1.ApprovalCheck{
+					PublicKey:           pubPEM2, // webhook verifies with key2
+					ChangeAnnotationKey: annotationKey,
+				},
+			}},
+		},
+	})
+
+	makeConfigMap(t, "change-wrong-key-cm")
+
+	// Sign with key1 but the guard expects key2.
+	newData := map[string]string{"key": "value", "extra-key": "extra-value"}
+	approvedCM := approveChangeConfigMap(t, privKey1, annotationKey, testNamespace, "change-wrong-key-cm", newData)
+
+	err := k8sClient.Update(context.Background(), approvedCM)
+	if err == nil {
+		t.Fatal("expected UPDATE to be denied because the change-approval annotation was signed with the wrong key")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// --- DataKeySafetyCheck helpers and tests ---
+
+// makeConfigMapWithData creates a ConfigMap in testNamespace with the given data.
+func makeConfigMapWithData(t *testing.T, name string, data map[string]string) *corev1.ConfigMap {
+	t.Helper()
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Data:       data,
+	}
+	if err := k8sClient.Create(context.Background(), cm); err != nil {
+		t.Fatalf("create ConfigMap %q: %v", name, err)
+	}
+	return cm
+}
+
+// makePodWithConfigMapRef creates a Pod in testNamespace with an env var that
+// references cmName/dataKey via configMapKeyRef.
+func makePodWithConfigMapRef(t *testing.T, podName, cmName, dataKey string) *corev1.Pod {
+	t.Helper()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: testNamespace},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:  "app",
+				Image: "registry.k8s.io/pause:3.9",
+				Env: []corev1.EnvVar{{
+					Name: "REF_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: cmName},
+							Key:                  dataKey,
+						},
+					},
+				}},
+			}},
+		},
+	}
+	if err := k8sClient.Create(context.Background(), pod); err != nil {
+		t.Fatalf("create Pod %q: %v", podName, err)
+	}
+	return pod
+}
+
+// makeDataKeySafetyGuard creates a ChangeValidator that protects ConfigMap
+// data keys referenced by Pods in testNamespace.
+func makeDataKeySafetyGuard(t *testing.T, name string) {
+	t.Helper()
+	makeChangeGuard(t, &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "no-key-removal-while-in-use",
+				Type:    ewv1alpha1.RuleTypeDataKeySafetyCheck,
+				Message: "ConfigMap key still referenced by a Pod",
+				DataKeySafetyCheck: &ewv1alpha1.DataKeySafetyCheck{
+					Resources: []ewv1alpha1.DataKeyReferenceResource{{
+						APIGroup: "",
+						Resource: "pods",
+						Version:  "v1",
+						KeyReferenceFields: []ewv1alpha1.KeyReferenceField{{
+							RefPath: "spec.containers.env.valueFrom.configMapKeyRef",
+						}},
+					}},
+				},
+			}},
+		},
+	})
+}
+
+// TestDataKeySafetyCheck_DeniesWhenReferencedKeyRemoved verifies that a
+// ConfigMap UPDATE is denied when a Pod in the same namespace references the
+// removed data key via configMapKeyRef.
+func TestDataKeySafetyCheck_DeniesWhenReferencedKeyRemoved(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makeConfigMapWithData(t, "safety-cm", map[string]string{
+		"db-host":   "localhost",
+		"app-token": "secret",
+	})
+	makePodWithConfigMapRef(t, "consumer-pod", "safety-cm", "db-host")
+	makeDataKeySafetyGuard(t, "data-key-safety-guard")
+
+	// Fetch the ConfigMap and attempt to remove the referenced key "db-host".
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "safety-cm"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap: %v", err)
+	}
+	fresh.Data = map[string]string{"app-token": "secret"} // "db-host" removed
+	err := k8sClient.Update(context.Background(), fresh)
+	if err == nil {
+		t.Fatal("expected ConfigMap UPDATE to be denied because 'db-host' is still referenced by a Pod")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// TestDataKeySafetyCheck_AllowsWhenUnreferencedKeyRemoved verifies that a
+// ConfigMap UPDATE is allowed when the removed data key is not referenced by
+// any Pod in the namespace.
+func TestDataKeySafetyCheck_AllowsWhenUnreferencedKeyRemoved(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makeConfigMapWithData(t, "safety-cm-unref", map[string]string{
+		"db-host":   "localhost",
+		"unused-key": "unused",
+	})
+	// Pod only references "db-host", not "unused-key".
+	makePodWithConfigMapRef(t, "consumer-pod-unref", "safety-cm-unref", "db-host")
+	makeDataKeySafetyGuard(t, "data-key-safety-guard-unref")
+
+	// Attempt to remove only the unreferenced key "unused-key".
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "safety-cm-unref"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap: %v", err)
+	}
+	fresh.Data = map[string]string{"db-host": "localhost"} // "unused-key" removed
+	if err := k8sClient.Update(context.Background(), fresh); err != nil {
+		t.Fatalf("expected ConfigMap UPDATE to be allowed when the removed key is not referenced: %v", err)
+	}
+}
+
+// TestDataKeySafetyCheck_AllowsWhenNoDependentPods verifies that a ConfigMap
+// UPDATE is allowed when no Pods in the namespace reference any of its keys.
+func TestDataKeySafetyCheck_AllowsWhenNoDependentPods(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makeConfigMapWithData(t, "safety-cm-nopods", map[string]string{
+		"some-key": "some-value",
+	})
+	// No Pods are created; the guard should not fire.
+	makeDataKeySafetyGuard(t, "data-key-safety-guard-nopods")
+
+	fresh := &corev1.ConfigMap{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "safety-cm-nopods"}, fresh); err != nil {
+		t.Fatalf("re-fetch ConfigMap: %v", err)
+	}
+	fresh.Data = map[string]string{} // remove "some-key"
+	if err := k8sClient.Update(context.Background(), fresh); err != nil {
+		t.Fatalf("expected ConfigMap UPDATE to be allowed when no Pods reference the key: %v", err)
 	}
 }
 
