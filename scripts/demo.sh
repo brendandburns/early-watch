@@ -107,7 +107,16 @@ cleanup() {
     print_info "Run 'bash scripts/demo-teardown.sh' to clean up when you are done."
     return
   fi
-  bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh"
+  if [ "$SKIP_EARLYWATCH_INSTALL" = "false" ]; then
+    print_step "Uninstalling EarlyWatch..."
+    if kubectl get namespace early-watch-system &>/dev/null; then
+      "$WATCHCTL" uninstall --kubeconfig "$HOME/.kube/config"
+      print_success "EarlyWatch uninstalled."
+    else
+      print_info "EarlyWatch is not installed — skipping uninstall."
+    fi
+  fi
+  bash "$(dirname "${BASH_SOURCE[0]}")/demo-teardown.sh" --skip-cluster-delete
 }
 _pre_exit_cleanup() { cleanup; }
 

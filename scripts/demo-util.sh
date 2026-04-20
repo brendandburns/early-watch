@@ -86,16 +86,20 @@ pause() {
 }
 
 run_cmd() {
-  # Simulate typing the command character-by-character with random pauses.
   local cmd_str="$*"
   printf "%s   \$ " "${BOLD}"
-  for (( i=0; i<${#cmd_str}; i++ )); do
-    printf "%s" "${cmd_str:$i:1}"
-    # Random delay between 30 ms and 120 ms; zero-pad to 3 decimal places.
-    sleep "$(printf '0.%03d' $(( 30 + RANDOM % 91 )))"
-  done
+  if [[ "${SIMULATE_TYPING:-1}" == "1" ]]; then
+    # Simulate typing the command character-by-character with random pauses.
+    for (( i=0; i<${#cmd_str}; i++ )); do
+      printf "%s" "${cmd_str:$i:1}"
+      # Random delay between 30 ms and 120 ms; zero-pad to 3 decimal places.
+      sleep "$(printf '0.%03d' $(( 30 + RANDOM % 91 )))"
+    done
+  else
+    printf "%s" "${cmd_str}"
+  fi
   printf "%s\n" "${RESET}"
-  bash -c "$*"
+  "$@"
 }
 
 # ── EXIT trap — keep terminal open ───────────────────────────────────────────
@@ -115,4 +119,7 @@ _on_exit() {
   echo -n "${DIM}   Press Enter to close...${RESET}"
   read -r _
 }
-trap '_on_exit' EXIT
+if [[ "${_EARLYWATCH_EXIT_TRAP_INSTALLED:-}" != "1" ]]; then
+  trap '_on_exit' EXIT
+  export _EARLYWATCH_EXIT_TRAP_INSTALLED=1
+fi
