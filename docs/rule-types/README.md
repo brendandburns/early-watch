@@ -15,7 +15,8 @@ EarlyWatch evaluates rules defined in a `ChangeValidator`'s `spec.rules` list.  
 | `AnnotationCheck` | Deny when the subject does not carry a required annotation (confirm-delete pattern). | [annotation-check.md](annotation-check.md) |
 | `ApprovalCheck` | Deny unless the subject carries a valid RSA-PSS SHA-256 approval signature in an annotation. | [approval-check.md](approval-check.md) |
 | `ManualTouchCheck` | Deny when a recent manual (kubectl) touch has been recorded for the resource within a configurable window. | [manual-touch-check.md](manual-touch-check.md) |
-| `ServicePodSelectorCheck` | Deny a Service UPDATE when the old selector matched Pods but the new selector would match none. | - |
+| `ServicePodSelectorCheck` | Deny a Service UPDATE when the old selector matched Pods but the new selector would match none. | [service-pod-selector-check.md](service-pod-selector-check.md) |
+| `DataKeySafetyCheck` | Deny an UPDATE that removes a data key from a ConfigMap or Secret while that key is still referenced by another resource. | [data-key-safety-check.md](data-key-safety-check.md) |
 
 ---
 
@@ -37,6 +38,7 @@ bash scripts/demo.sh --demos=<key>
 | `ExpressionCheck` | `expression` | `scripts/demo-expression-check.sh` |
 | `ManualTouchCheck` | `manualtouch` | `scripts/demo-manual-touch-check.sh` |
 | `ServicePodSelectorCheck` | `servicepodselector` | `scripts/demo-service-pod-selector-check.sh` |
+| `DataKeySafetyCheck` | `datakeysafety` | `scripts/demo-data-key-safety-check.sh` |
 
 ---
 
@@ -51,6 +53,8 @@ bash scripts/demo.sh --demos=<key>
 | Require an explicit annotation before a destructive operation proceeds | `AnnotationCheck` |
 | Require cryptographically verifiable sign-off from a key holder | `ApprovalCheck` |
 | Protect a recently manually-edited resource from being overwritten by automation | `ManualTouchCheck` |
+| Prevent a Service UPDATE from dropping all Pod backends | `ServicePodSelectorCheck` |
+| Prevent removing a ConfigMap or Secret key that is still consumed by a workload | `DataKeySafetyCheck` |
 
 ---
 
@@ -72,6 +76,8 @@ rules:
     annotationCheck: ...      # when type: AnnotationCheck
     approvalCheck: ...        # when type: ApprovalCheck
     manualTouchCheck: ...     # when type: ManualTouchCheck
+    servicePodSelectorCheck: {} # when type: ServicePodSelectorCheck (no config)
+    dataKeySafetyCheck: ...   # when type: DataKeySafetyCheck
 ```
 
 See the [ChangeValidator CRD reference](../custom-resources/change-validator.md) for the full field listing.

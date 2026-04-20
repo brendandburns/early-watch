@@ -12,3 +12,4 @@ This directory contains one example `ChangeValidator` manifest for each validato
 | `ExpressionCheck` | [expression-check.yaml](expression-check.yaml) |
 | `ManualTouchCheck` | [manual-touch-check.yaml](manual-touch-check.yaml) |
 | `ServicePodSelectorCheck` | [service-pod-selector-check.yaml](service-pod-selector-check.yaml) |
+| `DataKeySafetyCheck` | [data-key-safety-check.yaml](data-key-safety-check.yaml) |
