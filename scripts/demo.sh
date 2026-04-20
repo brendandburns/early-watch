@@ -8,6 +8,12 @@
 #
 #   demo-service.sh   — Protect a Service while matching Pods are running
 #   demo-configmap.sh — Protect a ConfigMap referenced by a Deployment
+#   demo-annotation-check.sh           — Require confirm-delete annotation
+#   demo-approval-check.sh             — Require cryptographic approval
+#   demo-check-lock.sh                 — Block delete when lock annotation exists
+#   demo-expression-check.sh           — Block requests by expression match
+#   demo-manual-touch-check.sh         — Block update after recent manual touch
+#   demo-service-pod-selector-check.sh — Block Service selector drop-to-zero updates
 #
 # Run scripts/demo-setup.sh first to create the kind cluster and download
 # watchctl, then run this script.
@@ -31,7 +37,7 @@
 #                               a Kubernetes Secret named "pullsecret" in the early-watch-system
 #                               namespace from this file (optional).
 #   --demos=<list>              Comma-separated list of demo names to run (default: all).
-#                               Examples: --demos=service   --demos=configmap   --demos=service,configmap
+#                               Examples: --demos=service   --demos=approval   --demos=service,approval
 set -euo pipefail
 
 # ── Shared utilities ─────────────────────────────────────────────────────────
@@ -53,7 +59,16 @@ for arg in "$@"; do
 done
 
 # Build the set of demos to run.  Default: all demos.
-ALL_DEMOS=(service configmap)
+ALL_DEMOS=(
+  service
+  configmap
+  annotation
+  approval
+  checklock
+  expression
+  manualtouch
+  servicepodselector
+)
 DEMOS=()
 if [ -z "$DEMOS_ARG" ]; then
   DEMOS=("${ALL_DEMOS[@]}")
@@ -216,7 +231,13 @@ echo ""
 echo "During this demo you will see:"
 _demo_selected service   && echo "  • A Service blocked from deletion because matching Pods are running"
 _demo_selected configmap && echo "  • A ConfigMap blocked from deletion because a Deployment references it"
-echo "  • Each deletion successfully completing once dependencies are removed"
+_demo_selected annotation && echo "  • A namespace deletion blocked until a confirm-delete annotation is added"
+_demo_selected approval && echo "  • A deletion blocked until a valid approval signature is attached"
+_demo_selected checklock && echo "  • A locked Deployment blocked from deletion until unlocked"
+_demo_selected expression && echo "  • A request blocked by an expression that matches admission fields"
+_demo_selected manualtouch && echo "  • An UPDATE blocked while a recent manual touch event exists"
+_demo_selected servicepodselector && echo "  • A Service UPDATE blocked when a selector change would match zero Pods"
+echo "  • Operations succeeding once each safety condition is satisfied"
 echo ""
 echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)  (≈1 min per demo + 1 min for install/uninstall)${RESET}"
 pause
@@ -232,6 +253,36 @@ fi
 if _demo_selected configmap; then
   # shellcheck source=scripts/demo-configmap.sh
   source "$SCRIPTS_DIR/demo-configmap.sh"
+fi
+
+if _demo_selected annotation; then
+  # shellcheck source=scripts/demo-annotation-check.sh
+  source "$SCRIPTS_DIR/demo-annotation-check.sh"
+fi
+
+if _demo_selected approval; then
+  # shellcheck source=scripts/demo-approval-check.sh
+  source "$SCRIPTS_DIR/demo-approval-check.sh"
+fi
+
+if _demo_selected checklock; then
+  # shellcheck source=scripts/demo-check-lock.sh
+  source "$SCRIPTS_DIR/demo-check-lock.sh"
+fi
+
+if _demo_selected expression; then
+  # shellcheck source=scripts/demo-expression-check.sh
+  source "$SCRIPTS_DIR/demo-expression-check.sh"
+fi
+
+if _demo_selected manualtouch; then
+  # shellcheck source=scripts/demo-manual-touch-check.sh
+  source "$SCRIPTS_DIR/demo-manual-touch-check.sh"
+fi
+
+if _demo_selected servicepodselector; then
+  # shellcheck source=scripts/demo-service-pod-selector-check.sh
+  source "$SCRIPTS_DIR/demo-service-pod-selector-check.sh"
 fi
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
@@ -271,7 +322,13 @@ if [ "$SKIP_EARLYWATCH_INSTALL" = "false" ]; then
 fi
 _demo_selected service   && echo "  ${GREEN}✔${RESET}  Blocking a Service deletion while Pods are running"
 _demo_selected configmap && echo "  ${GREEN}✔${RESET}  Blocking a ConfigMap deletion while a Deployment references it"
-echo "  ${GREEN}✔${RESET}  Allowing deletions once their dependencies are cleaned up"
+_demo_selected annotation && echo "  ${GREEN}✔${RESET}  Requiring a confirm-delete annotation before namespace deletion"
+_demo_selected approval && echo "  ${GREEN}✔${RESET}  Requiring RSA approval signatures before deletion"
+_demo_selected checklock && echo "  ${GREEN}✔${RESET}  Blocking locked Deployment deletion until unlocked"
+_demo_selected expression && echo "  ${GREEN}✔${RESET}  Denying a targeted request via expression match"
+_demo_selected manualtouch && echo "  ${GREEN}✔${RESET}  Blocking UPDATE while recent manual touch events exist"
+_demo_selected servicepodselector && echo "  ${GREEN}✔${RESET}  Blocking Service selector updates that drop to zero Pods"
+echo "  ${GREEN}✔${RESET}  Allowing operations once safety conditions are met"
 echo "  ${GREEN}✔${RESET}  Cleanly uninstalled from the cluster"
 echo ""
 echo "Next steps:"
