@@ -1,4 +1,4 @@
-// Package patch provides internal utilities for computing and normalising JSON
+// Package patch provides internal utilities for computing and normalizing JSON
 // merge patches between Kubernetes resource objects.  These utilities are
 // shared by the admission webhook (verification) and the approve CLI command
 // (signing).
