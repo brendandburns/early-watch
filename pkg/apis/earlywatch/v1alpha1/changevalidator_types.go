@@ -343,6 +343,7 @@ type ApprovalCheck struct {
 	// base64-encoded delete-approval signature.
 	// Defaults to "earlywatch.io/approved".
 	// +optional
+	// +kubebuilder:default="earlywatch.io/approved"
 	AnnotationKey string `json:"annotationKey,omitempty"`
 
 	// ChangeAnnotationKey is the annotation on the existing resource whose
@@ -352,5 +353,6 @@ type ApprovalCheck struct {
 	// watchctl approve change before the UPDATE is submitted.
 	// Defaults to "earlywatch.io/change-approved".
 	// +optional
+	// +kubebuilder:default="earlywatch.io/change-approved"
 	ChangeAnnotationKey string `json:"changeAnnotationKey,omitempty"`
 }
