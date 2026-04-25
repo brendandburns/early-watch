@@ -206,8 +206,8 @@ const (
 	RuleTypeManualTouchCheck RuleType = "ManualTouchCheck"
 
 	// RuleTypeServicePodSelectorCheck denies an UPDATE to a Service when the
-	// service previously selected at least one Pod but would select no Pods
-	// after the change.  Headless services with no selector are exempt.
+	// service previously selected at least one ready Pod but would select no
+	// ready Pods after the change.  Headless services with no selector are exempt.
 	RuleTypeServicePodSelectorCheck RuleType = "ServicePodSelectorCheck"
 
 	// RuleTypeDataKeySafetyCheck denies an UPDATE when a data key is removed
@@ -399,9 +399,9 @@ type ApprovalCheck struct {
 }
 
 // ServicePodSelectorCheck configures the service-to-pod selector safety check.
-// It prevents a Service UPDATE from dropping all Pod references when the service
-// previously had at least one matching Pod.  Headless services (spec.clusterIP
-// == "None") that carry no selector are exempt from this check.
+// It prevents a Service UPDATE from dropping all ready Pod references when the
+// service previously had at least one ready matching Pod.  Headless services
+// (spec.clusterIP == "None") that carry no selector are exempt from this check.
 type ServicePodSelectorCheck struct{}
 
 // DataKeySafetyCheck describes a check that prevents UPDATE requests from
