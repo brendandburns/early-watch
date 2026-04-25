@@ -2,7 +2,7 @@
 
 The `ServicePodSelectorCheck` rule type **denies a Service UPDATE when the old selector matched at least one Pod but the new selector would match none**.  This prevents accidental traffic blackholes caused by a typo or copy-paste error in a Service's label selector.
 
-Headless Services (`spec.clusterIP: "None"`) that carry no selector are exempt.
+All headless Services (`spec.clusterIP: "None"`) are exempt from this check, regardless of whether they have a selector.
 
 ---
 
@@ -55,7 +55,7 @@ spec:
 To proceed with a selector change:
 
 1. Deploy Pods that match the *new* selector labels.
-2. Verify at least one Pod is Running with those labels.
+2. Verify that at least one Pod exists with those labels (the check does not evaluate Pod phase or readiness).
 3. Apply the Service UPDATE — the check will now pass.
 4. Clean up Pods matching the old selector.
 
