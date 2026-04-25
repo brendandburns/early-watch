@@ -17,6 +17,7 @@ import (
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -1148,7 +1149,7 @@ func isPodReady(obj map[string]interface{}) bool {
 		if !ok {
 			continue
 		}
-		if cond["type"] == "Ready" && cond["status"] == "True" {
+		if cond["type"] == string(corev1.PodReady) && cond["status"] == string(corev1.ConditionTrue) {
 			return true
 		}
 	}
