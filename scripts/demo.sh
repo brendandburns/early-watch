@@ -14,6 +14,7 @@
 #   demo-expression-check.sh           — Block requests by expression match
 #   demo-manual-touch-check.sh         — Block update after recent manual touch
 #   demo-service-pod-selector-check.sh — Block Service selector drop-to-zero updates
+#   demo-data-key-safety-check.sh      — Block ConfigMap/Secret key removal while referenced
 #
 # Run scripts/demo-setup.sh first to create the kind cluster and download
 # watchctl, then run this script.
@@ -68,6 +69,7 @@ ALL_DEMOS=(
   expression
   manualtouch
   servicepodselector
+  datakeysafety
 )
 DEMOS=()
 if [ -z "$DEMOS_ARG" ]; then
@@ -246,6 +248,7 @@ _demo_selected checklock && echo "  • A locked Deployment blocked from deletio
 _demo_selected expression && echo "  • A request blocked by an expression that matches admission fields"
 _demo_selected manualtouch && echo "  • An UPDATE blocked while a recent manual touch event exists"
 _demo_selected servicepodselector && echo "  • A Service UPDATE blocked when a selector change would match zero Pods"
+_demo_selected datakeysafety && echo "  • A ConfigMap key removal blocked while a Pod still references that key"
 echo "  • Operations succeeding once each safety condition is satisfied"
 echo ""
 echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)  (≈1 min per demo + 1 min for install/uninstall)${RESET}"
@@ -294,6 +297,11 @@ if _demo_selected servicepodselector; then
   source "$SCRIPTS_DIR/demo-service-pod-selector-check.sh"
 fi
 
+if _demo_selected datakeysafety; then
+  # shellcheck source=scripts/demo-data-key-safety-check.sh
+  source "$SCRIPTS_DIR/demo-data-key-safety-check.sh"
+fi
+
 # ── Uninstall ────────────────────────────────────────────────────────────────
 print_header "Uninstall EarlyWatch"
 print_info "watchctl uninstall removes all EarlyWatch components from the cluster"
@@ -337,6 +345,7 @@ _demo_selected checklock && echo "  ${GREEN}✔${RESET}  Blocking locked Deploym
 _demo_selected expression && echo "  ${GREEN}✔${RESET}  Denying a targeted request via expression match"
 _demo_selected manualtouch && echo "  ${GREEN}✔${RESET}  Blocking UPDATE while recent manual touch events exist"
 _demo_selected servicepodselector && echo "  ${GREEN}✔${RESET}  Blocking Service selector updates that drop to zero Pods"
+_demo_selected datakeysafety && echo "  ${GREEN}✔${RESET}  Blocking ConfigMap key removal while a Pod still references it"
 echo "  ${GREEN}✔${RESET}  Allowing operations once safety conditions are met"
 echo "  ${GREEN}✔${RESET}  Cleanly uninstalled from the cluster"
 echo ""

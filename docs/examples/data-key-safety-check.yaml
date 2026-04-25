@@ -1,0 +1,32 @@
+apiVersion: earlywatch.io/v1alpha1
+kind: ChangeValidator
+metadata:
+  name: example-data-key-safety-check
+  namespace: default
+spec:
+  subject:
+    apiGroup: ""
+    resource: configmaps
+    names:
+      - app-config
+  operations:
+    - UPDATE
+  rules:
+    - name: no-referenced-key-removal
+      type: DataKeySafetyCheck
+      dataKeySafetyCheck:
+        resources:
+          - apiGroup: apps
+            resource: deployments
+            version: v1
+            keyReferenceFields:
+              - refPath: spec.template.spec.containers.env.valueFrom.configMapKeyRef
+          - apiGroup: ""
+            resource: pods
+            keyReferenceFields:
+              - refPath: spec.containers.env.valueFrom.configMapKeyRef
+              - refPath: spec.initContainers.env.valueFrom.configMapKeyRef
+        sameNamespace: true
+      message: >
+        ConfigMap "{{name}}" cannot have a key removed because it is still
+        referenced by a running workload.
