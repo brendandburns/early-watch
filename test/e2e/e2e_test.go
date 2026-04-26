@@ -74,7 +74,7 @@ var (
 	// the install/uninstall code paths against the same cluster.
 	restCfg *rest.Config
 
-	// mgrCtx is cancelled in TestMain after all tests have run in order to
+	// mgrCtx is canceled in TestMain after all tests have run in order to
 	// shut down the webhook server.
 	mgrCtx    context.Context
 	mgrCancel context.CancelFunc
@@ -166,10 +166,10 @@ func mustAddToScheme(fn func(*k8sruntime.Scheme) error, s *k8sruntime.Scheme) {
 func waitForWebhook(host string, port int) error {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	deadline := time.Now().Add(30 * time.Second)
-	dialer := &net.Dialer{Timeout: time.Second}
 	tlsCfg := &tls.Config{InsecureSkipVerify: true} //nolint:gosec // self-signed cert in test environment
+	d := &tls.Dialer{NetDialer: &net.Dialer{Timeout: time.Second}, Config: tlsCfg}
 	for time.Now().Before(deadline) {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
+		conn, err := d.DialContext(context.Background(), "tcp", addr)
 		if err == nil {
 			_ = conn.Close()
 			return nil
@@ -741,7 +741,7 @@ func approveChangeConfigMap(t *testing.T, privKey *rsa.PrivateKey, annotationKey
 	}
 
 	// Extract just the annotation value from the signed JSON and set it on
-	// the typed ConfigMap so that k8sClient.Update serialises it correctly.
+	// the typed ConfigMap so that k8sClient.Update serializes it correctly.
 	var signedObj map[string]interface{}
 	if err := json.Unmarshal(annotatedJSON, &signedObj); err != nil {
 		t.Fatalf("unmarshal signed object: %v", err)
@@ -1022,7 +1022,7 @@ func TestDataKeySafetyCheck_AllowsWhenUnreferencedKeyRemoved(t *testing.T) {
 	t.Cleanup(func() { cleanupNamespace(t) })
 
 	makeConfigMapWithData(t, "safety-cm-unref", map[string]string{
-		"db-host":   "localhost",
+		"db-host":    "localhost",
 		"unused-key": "unused",
 	})
 	// Pod only references "db-host", not "unused-key".
@@ -1064,7 +1064,7 @@ func TestDataKeySafetyCheck_AllowsWhenNoDependentPods(t *testing.T) {
 
 // --- install / uninstall tests ---
 
-// writeTestKubeconfig serialises the envtest REST config into a temporary
+// writeTestKubeconfig serializes the envtest REST config into a temporary
 // kubeconfig file and returns the path.  The file is cleaned up automatically
 // when the test ends.
 func writeTestKubeconfig(t *testing.T) string {
