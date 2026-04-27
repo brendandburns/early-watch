@@ -2,6 +2,7 @@
 package v1alpha1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -23,6 +24,7 @@ func addKnownTypes(s *runtime.Scheme) error {
 		&ManualTouchMonitor{}, &ManualTouchMonitorList{},
 		&ManualTouchEvent{}, &ManualTouchEventList{},
 	)
+	metav1.AddToGroupVersion(s, GroupVersion)
 	return nil
 }
 
