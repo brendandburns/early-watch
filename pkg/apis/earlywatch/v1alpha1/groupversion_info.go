@@ -2,8 +2,8 @@
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 var (
@@ -11,16 +11,19 @@ var (
 	GroupVersion = schema.GroupVersion{Group: "earlywatch.io", Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
+	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
 )
 
-func init() {
-	SchemeBuilder.Register(&ChangeValidator{}, &ChangeValidatorList{})
-	SchemeBuilder.Register(&ManualTouchMonitor{}, &ManualTouchMonitorList{})
-	SchemeBuilder.Register(&ManualTouchEvent{}, &ManualTouchEventList{})
+func addKnownTypes(s *runtime.Scheme) error {
+	s.AddKnownTypes(GroupVersion,
+		&ChangeValidator{}, &ChangeValidatorList{},
+		&ManualTouchMonitor{}, &ManualTouchMonitorList{},
+		&ManualTouchEvent{}, &ManualTouchEventList{},
+	)
+	return nil
 }
 
 // Resource returns a GroupResource for the given resource string.
