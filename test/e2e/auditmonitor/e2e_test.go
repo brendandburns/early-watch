@@ -44,8 +44,8 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/dynamic"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -187,10 +187,10 @@ func createNamespace(name string) {
 func waitForWebhook(host string, port int) error {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	deadline := time.Now().Add(30 * time.Second)
-	dialer := &net.Dialer{Timeout: time.Second}
 	tlsCfg := &tls.Config{InsecureSkipVerify: true} //nolint:gosec // self-signed cert in test environment
+	d := &tls.Dialer{NetDialer: &net.Dialer{Timeout: time.Second}, Config: tlsCfg}
 	for time.Now().Before(deadline) {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
+		conn, err := d.DialContext(context.Background(), "tcp", addr)
 		if err == nil {
 			_ = conn.Close()
 			return nil
@@ -266,7 +266,7 @@ func postAuditEvent(t *testing.T, event auditmonitor.AuditEvent) int {
 	if err != nil {
 		t.Fatalf("marshal audit event: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/audit", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/audit", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 	auditHandler.ServeHTTP(w, req)
 	return w.Code

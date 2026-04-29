@@ -175,6 +175,7 @@ spec:
                           - CheckLock
                           - ManualTouchCheck
                           - ServicePodSelectorCheck
+                          - DataKeySafetyCheck
                       message:
                         description: >
                           Message is the human-readable denial message
