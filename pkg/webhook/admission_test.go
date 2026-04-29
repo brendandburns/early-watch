@@ -3307,3 +3307,104 @@ func TestAppliesToRequestCluster_Names_NoMatch(t *testing.T) {
 		t.Error("ClusterChangeValidator should NOT apply when name is not in Names list")
 	}
 }
+
+// --- Interaction tests: cluster-level + namespace-level validators ---
+
+// TestHandle_NamespaceValidatorMoreRestrictive verifies that when both a
+// ClusterChangeValidator (permissive — allows DELETE) and a namespaced
+// ChangeValidator (restrictive — denies DELETE) exist, the namespace-level
+// validator is applied and the request is denied.
+func TestHandle_NamespaceValidatorMoreRestrictive(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	// Cluster-level guard: only denies UPDATE operations on services.
+	clusterGuard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+		"operation == 'UPDATE'",
+		"cluster policy: service updates not allowed",
+	)
+
+	// Namespace-level guard: denies DELETE operations on services — more
+	// restrictive than the cluster policy for this specific operation.
+	nsGuard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "deny-delete",
+					Type:    ewv1alpha1.RuleTypeExpressionCheck,
+					Message: "namespace policy: service deletion not allowed in default",
+					ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+						Expression: "operation == 'DELETE'",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(clusterGuard, nsGuard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// DELETE should be denied by the namespace-level guard.
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected request to be denied by namespace-level ChangeValidator")
+	}
+	if resp.Result == nil || resp.Result.Message != "namespace policy: service deletion not allowed in default" {
+		t.Errorf("expected denial message from namespace-level guard, got: %v", resp.Result)
+	}
+}
+
+// TestHandle_ClusterValidatorMoreRestrictive verifies that when both a
+// ClusterChangeValidator (restrictive — denies DELETE) and a namespaced
+// ChangeValidator (permissive — only covers UPDATE) exist, the cluster-level
+// validator is applied and the request is denied.
+func TestHandle_ClusterValidatorMoreRestrictive(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	// Cluster-level guard: denies DELETE — more restrictive than the namespace policy.
+	clusterGuard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"cluster policy: service deletion not allowed cluster-wide",
+	)
+
+	// Namespace-level guard: only covers UPDATE, so DELETE passes through it.
+	nsGuard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "deny-update",
+					Type:    ewv1alpha1.RuleTypeExpressionCheck,
+					Message: "namespace policy: service updates not allowed in default",
+					ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+						Expression: "operation == 'UPDATE'",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(clusterGuard, nsGuard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// DELETE is not covered by the namespace guard, but the cluster guard should deny it.
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected request to be denied by cluster-level ClusterChangeValidator")
+	}
+	if resp.Result == nil || resp.Result.Message != "cluster policy: service deletion not allowed cluster-wide" {
+		t.Errorf("expected denial message from cluster-level guard, got: %v", resp.Result)
+	}
+}
