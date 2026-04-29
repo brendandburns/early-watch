@@ -185,10 +185,10 @@ func createTestNamespace() {
 	}
 }
 
-// cleanupNamespace removes all ChangeValidators, ConfigMaps, Services, and Pods
-// from testNamespace.  It deletes ChangeValidators first and waits for them to
-// disappear from the API server so that subsequent deletes of guarded resources
-// are not blocked by the webhook.
+// cleanupNamespace removes all ChangeValidators, ClusterChangeValidators,
+// ConfigMaps, Services, and Pods from testNamespace.  It deletes validators
+// first and waits for them to disappear from the API server so that subsequent
+// deletes of guarded resources are not blocked by the webhook.
 func cleanupNamespace(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
@@ -202,7 +202,7 @@ func cleanupNamespace(t *testing.T) {
 		}
 	}
 
-	// Also delete any cluster-wide guards that may have been created.
+	// Also delete any namespace-scoped guards from all namespaces that may have been created.
 	allGuards := &ewv1alpha1.ChangeValidatorList{}
 	if err := k8sClient.List(ctx, allGuards); err == nil {
 		for i := range allGuards.Items {
@@ -210,12 +210,23 @@ func cleanupNamespace(t *testing.T) {
 		}
 	}
 
-	// Wait until no guards remain so the webhook no longer blocks deletions
-	// of resources that were protected by those guards.
+	// Delete all ClusterChangeValidators.
+	ccvList := &ewv1alpha1.ClusterChangeValidatorList{}
+	if err := k8sClient.List(ctx, ccvList); err == nil {
+		for i := range ccvList.Items {
+			_ = k8sClient.Delete(ctx, &ccvList.Items[i])
+		}
+	}
+
+	// Wait until no ChangeValidators or ClusterChangeValidators remain so the
+	// webhook no longer blocks deletions of resources that were protected.
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		list := &ewv1alpha1.ChangeValidatorList{}
-		if err := k8sClient.List(ctx, list, client.InNamespace(testNamespace)); err == nil && len(list.Items) == 0 {
+		nsList := &ewv1alpha1.ChangeValidatorList{}
+		clList := &ewv1alpha1.ClusterChangeValidatorList{}
+		nsGone := k8sClient.List(ctx, nsList, client.InNamespace(testNamespace)) == nil && len(nsList.Items) == 0
+		clGone := k8sClient.List(ctx, clList) == nil && len(clList.Items) == 0
+		if nsGone && clGone {
 			break
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -255,6 +266,14 @@ func makeChangeGuard(t *testing.T, guard *ewv1alpha1.ChangeValidator) {
 	}
 }
 
+// makeClusterChangeGuard creates a ClusterChangeValidator (cluster-scoped).
+func makeClusterChangeGuard(t *testing.T, guard *ewv1alpha1.ClusterChangeValidator) {
+	t.Helper()
+	if err := k8sClient.Create(context.Background(), guard); err != nil {
+		t.Fatalf("create ClusterChangeValidator %q: %v", guard.Name, err)
+	}
+}
+
 // makeConfigMap creates a ConfigMap in testNamespace.
 func makeConfigMap(t *testing.T, name string) *corev1.ConfigMap {
 	t.Helper()
@@ -266,6 +285,43 @@ func makeConfigMap(t *testing.T, name string) *corev1.ConfigMap {
 		t.Fatalf("create ConfigMap %q: %v", name, err)
 	}
 	return cm
+}
+
+// makeConfigMapInNamespace creates a ConfigMap in the specified namespace.
+func makeConfigMapInNamespace(t *testing.T, name, namespace string) *corev1.ConfigMap {
+	t.Helper()
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Data:       map[string]string{"key": "value"},
+	}
+	if err := k8sClient.Create(context.Background(), cm); err != nil {
+		t.Fatalf("create ConfigMap %q in namespace %q: %v", name, namespace, err)
+	}
+	return cm
+}
+
+// createLabeledNamespace creates a namespace with the given labels and
+// registers a cleanup function to delete it (and any ConfigMaps inside it)
+// when the test ends.
+func createLabeledNamespace(t *testing.T, name string, labels map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+	}
+	if err := k8sClient.Create(ctx, ns); err != nil && !kerrors.IsAlreadyExists(err) {
+		t.Fatalf("create namespace %q: %v", name, err)
+	}
+	t.Cleanup(func() {
+		// Remove any ConfigMaps from the namespace before deleting it.
+		cmList := &corev1.ConfigMapList{}
+		if err := k8sClient.List(ctx, cmList, client.InNamespace(name)); err == nil {
+			for i := range cmList.Items {
+				_ = k8sClient.Delete(ctx, &cmList.Items[i])
+			}
+		}
+		_ = k8sClient.Delete(ctx, ns)
+	})
 }
 
 // makeService creates a Service in testNamespace with the given label selector.
@@ -862,6 +918,149 @@ func TestServicePodSelectorCheck_AllowsHeadlessService(t *testing.T) {
 	fresh.Spec.Selector = map[string]string{"app": "no-such-app"}
 	if err := k8sClient.Update(context.Background(), fresh); err != nil {
 		t.Fatalf("expected headless Service UPDATE to be allowed (headless services are exempt): %v", err)
+	}
+}
+
+// --- ClusterChangeValidator e2e tests ---
+
+// TestClusterChangeValidator_DeniesMatchingOperation verifies that a
+// ClusterChangeValidator guard denies admission requests whose operation and
+// resource match its configuration, regardless of namespace.
+func TestClusterChangeValidator_DeniesMatchingOperation(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	makeClusterChangeGuard(t, &ewv1alpha1.ClusterChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-deny-cm-delete"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "no-delete",
+				Type:    ewv1alpha1.RuleTypeExpressionCheck,
+				Message: "cluster policy: configmap deletion is not allowed",
+				ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+					Expression: "operation == 'DELETE'",
+				},
+			}},
+		},
+	})
+
+	cm := makeConfigMap(t, "cluster-protected-cm")
+	err := k8sClient.Delete(context.Background(), cm)
+	if err == nil {
+		t.Fatal("expected DELETE to be denied by the ClusterChangeValidator guard")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// TestClusterChangeValidator_AllowsNonTargetedOperation verifies that a
+// ClusterChangeValidator guard does not block operations it was not configured for.
+func TestClusterChangeValidator_AllowsNonTargetedOperation(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	// Guard only covers UPDATE; CREATE must be allowed.
+	makeClusterChangeGuard(t, &ewv1alpha1.ClusterChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-deny-cm-update-only"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "configmaps"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationUpdate},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "no-update",
+				Type:    ewv1alpha1.RuleTypeExpressionCheck,
+				Message: "cluster policy: configmap updates are not allowed",
+				ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+					Expression: "operation == 'UPDATE'",
+				},
+			}},
+		},
+	})
+
+	// CREATE is not in the guard's Operations list; it must succeed.
+	if makeConfigMap(t, "cluster-create-allowed-cm") == nil {
+		t.Fatal("expected ConfigMap CREATE to succeed (cluster guard only covers UPDATE)")
+	}
+}
+
+// TestClusterChangeValidator_NamespaceSelector_DeniesWhenMatching verifies that
+// a ClusterChangeValidator with a NamespaceSelector denies requests in namespaces
+// whose labels match the selector.
+func TestClusterChangeValidator_NamespaceSelector_DeniesWhenMatching(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	const labeledNS = "ew-e2e-prod-ns"
+	createLabeledNamespace(t, labeledNS, map[string]string{"env": "prod"})
+
+	makeClusterChangeGuard(t, &ewv1alpha1.ClusterChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-deny-prod-cm-delete"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "configmaps",
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"env": "prod"},
+				},
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "no-delete-in-prod",
+				Type:    ewv1alpha1.RuleTypeExpressionCheck,
+				Message: "cluster policy: configmap deletion is not allowed in prod namespaces",
+				ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+					Expression: "operation == 'DELETE'",
+				},
+			}},
+		},
+	})
+
+	cm := makeConfigMapInNamespace(t, "prod-cm", labeledNS)
+	err := k8sClient.Delete(context.Background(), cm)
+	if err == nil {
+		t.Fatal("expected DELETE to be denied: namespace matches NamespaceSelector")
+	}
+	if !kerrors.IsForbidden(err) {
+		t.Fatalf("expected Forbidden error, got: %v", err)
+	}
+}
+
+// TestClusterChangeValidator_NamespaceSelector_AllowsWhenNotMatching verifies
+// that a ClusterChangeValidator with a NamespaceSelector does not block requests
+// in namespaces whose labels do not match the selector.
+func TestClusterChangeValidator_NamespaceSelector_AllowsWhenNotMatching(t *testing.T) {
+	cleanupNamespace(t)
+	t.Cleanup(func() { cleanupNamespace(t) })
+
+	// testNamespace carries no labels; the guard targets "env=prod" only.
+	makeClusterChangeGuard(t, &ewv1alpha1.ClusterChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-deny-prod-only"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject: ewv1alpha1.SubjectResource{
+				APIGroup: "",
+				Resource: "configmaps",
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"env": "prod"},
+				},
+			},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{{
+				Name:    "no-delete-in-prod",
+				Type:    ewv1alpha1.RuleTypeExpressionCheck,
+				Message: "cluster policy: configmap deletion is not allowed in prod namespaces",
+				ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+					Expression: "operation == 'DELETE'",
+				},
+			}},
+		},
+	})
+
+	// testNamespace does not have "env=prod"; the guard must not apply.
+	cm := makeConfigMap(t, "non-prod-cm")
+	if err := k8sClient.Delete(context.Background(), cm); err != nil {
+		t.Fatalf("expected DELETE to be allowed: namespace does not match NamespaceSelector: %v", err)
 	}
 }
 
