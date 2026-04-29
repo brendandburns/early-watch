@@ -21,6 +21,7 @@ var (
 func addKnownTypes(s *runtime.Scheme) error {
 	s.AddKnownTypes(GroupVersion,
 		&ChangeValidator{}, &ChangeValidatorList{},
+		&ClusterChangeValidator{}, &ClusterChangeValidatorList{},
 		&ManualTouchMonitor{}, &ManualTouchMonitorList{},
 		&ManualTouchEvent{}, &ManualTouchEventList{},
 	)
