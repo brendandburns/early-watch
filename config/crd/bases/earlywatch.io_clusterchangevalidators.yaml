@@ -172,9 +172,10 @@ spec:
                           - NameReferenceCheck
                           - ApprovalCheck
                           - AnnotationCheck
-                           - CheckLock
+                          - CheckLock
                           - ManualTouchCheck
                           - ServicePodSelectorCheck
+                          - DataKeySafetyCheck
                       message:
                         description: >
                           Message is the human-readable denial message
@@ -338,6 +339,13 @@ spec:
                               whose value holds the base64-encoded approval
                               signature. Defaults to "earlywatch.io/approved".
                             type: string
+                          changeAnnotationKey:
+                            description: >
+                              ChangeAnnotationKey is the annotation on the
+                              existing resource whose value holds the
+                              base64-encoded change-approval (UPDATE) signature.
+                              Defaults to "earlywatch.io/change-approved".
+                            type: string
                       annotationCheck:
                         description: >
                           AnnotationCheck denies the request when the subject
@@ -402,6 +410,50 @@ spec:
                           services (spec.clusterIP == "None") are exempt.
                           Required when type is ServicePodSelectorCheck.
                         type: object
+                      dataKeySafetyCheck:
+                        description: >
+                          DataKeySafetyCheck prevents UPDATE requests that remove
+                          a data key from a ConfigMap or Secret when that specific
+                          key is still referenced by another resource.
+                          Required when type is DataKeySafetyCheck.
+                        type: object
+                        properties:
+                          resources:
+                            description: >
+                              Resources is the list of resource types to scan
+                              for key references.
+                            type: array
+                            minItems: 1
+                            items:
+                              type: object
+                              required: ["resource"]
+                              properties:
+                                apiGroup:
+                                  type: string
+                                resource:
+                                  type: string
+                                version:
+                                  type: string
+                                keyReferenceFields:
+                                  type: array
+                                  minItems: 1
+                                  items:
+                                    type: object
+                                    required: ["refPath"]
+                                    properties:
+                                      refPath:
+                                        type: string
+                                      nameSubField:
+                                        type: string
+                                      keySubField:
+                                        type: string
+                          sameNamespace:
+                            description: >
+                              SameNamespace, when true, restricts the lookup
+                              to the same namespace as the subject resource.
+                              Defaults to true.
+                            type: boolean
+                            default: true
             status:
               description: ChangeValidatorStatus defines the observed state of ClusterChangeValidator.
               type: object
