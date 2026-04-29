@@ -3097,3 +3097,213 @@ func TestHandle_ServicePodSelectorCheck_NoPreviousPods_Allowed(t *testing.T) {
 		t.Errorf("expected Handle to allow service UPDATE when old service had no matching pods: %v", resp.Result)
 	}
 }
+
+// --- ClusterChangeValidator tests ---
+
+// newClusterGuard builds a ClusterChangeValidator with an ExpressionCheck rule.
+func newClusterGuard(subject ewv1alpha1.SubjectResource, ops []ewv1alpha1.OperationType, expr, message string) *ewv1alpha1.ClusterChangeValidator {
+	return &ewv1alpha1.ClusterChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "cluster-guard"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    subject,
+			Operations: ops,
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "deny-op",
+					Type:    ewv1alpha1.RuleTypeExpressionCheck,
+					Message: message,
+					ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+						Expression: expr,
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestHandle_ClusterChangeValidator_Denied verifies that a ClusterChangeValidator
+// denies requests that violate its rules.
+func TestHandle_ClusterChangeValidator_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"cluster policy: services cannot be deleted",
+	)
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected request to be denied by ClusterChangeValidator rule")
+	}
+}
+
+// TestHandle_ClusterChangeValidator_Allowed verifies that a ClusterChangeValidator
+// allows requests that do not violate any rules.
+func TestHandle_ClusterChangeValidator_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"cluster policy: services cannot be deleted",
+	)
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// CREATE is not in the guard's Operations list.
+	req := makeRequest(admissionv1.Create, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected allowed for CREATE when guard only covers DELETE: %v", resp.Result)
+	}
+}
+
+// TestHandle_ClusterChangeValidator_NamespaceSelector_Denied verifies that a
+// ClusterChangeValidator with a NamespaceSelector denies a request from a
+// namespace whose labels match the selector.
+func TestHandle_ClusterChangeValidator_NamespaceSelector_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{
+			APIGroup: "",
+			Resource: "services",
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+		},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"cluster policy: services cannot be deleted in prod",
+	)
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "prod-ns",
+			Labels: map[string]string{"env": "prod"},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard, ns).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	req := makeRequest(admissionv1.Delete, "", "services", "prod-ns", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected request to be denied: namespace matches NamespaceSelector")
+	}
+}
+
+// TestHandle_ClusterChangeValidator_NamespaceSelector_Allowed verifies that a
+// ClusterChangeValidator with a NamespaceSelector does NOT apply when the
+// request's namespace does not match the selector.
+func TestHandle_ClusterChangeValidator_NamespaceSelector_Allowed(t *testing.T) {
+	scheme := newHandlerScheme(t)
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{
+			APIGroup: "",
+			Resource: "services",
+			NamespaceSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"env": "prod"},
+			},
+		},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"cluster policy: services cannot be deleted in prod",
+	)
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "dev-ns",
+			Labels: map[string]string{"env": "dev"},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard, ns).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	// dev-ns does not have env=prod so the guard should not apply.
+	req := makeRequest(admissionv1.Delete, "", "services", "dev-ns", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("expected allowed: namespace does not match NamespaceSelector: %v", resp.Result)
+	}
+}
+
+// TestAppliesToRequestCluster_Match verifies basic matching for ClusterChangeValidator.
+func TestAppliesToRequestCluster_Match(t *testing.T) {
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"msg",
+	)
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	if !appliesToRequestCluster(guard, req) {
+		t.Error("expected ClusterChangeValidator to apply to DELETE services request")
+	}
+}
+
+// TestAppliesToRequestCluster_WrongResource verifies a non-matching resource.
+func TestAppliesToRequestCluster_WrongResource(t *testing.T) {
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"msg",
+	)
+	req := makeRequest(admissionv1.Delete, "", "pods", "default", "my-pod", nil)
+	if appliesToRequestCluster(guard, req) {
+		t.Error("ClusterChangeValidator should NOT apply to pods request")
+	}
+}
+
+// TestAppliesToRequestCluster_WrongOperation verifies a non-matching operation.
+func TestAppliesToRequestCluster_WrongOperation(t *testing.T) {
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"msg",
+	)
+	req := makeRequest(admissionv1.Update, "", "services", "default", "my-svc", nil)
+	if appliesToRequestCluster(guard, req) {
+		t.Error("ClusterChangeValidator should NOT apply to UPDATE when only DELETE is listed")
+	}
+}
+
+// TestAppliesToRequestCluster_Names_Match verifies that a names-restricted guard matches.
+func TestAppliesToRequestCluster_Names_Match(t *testing.T) {
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services", Names: []string{"protected-svc"}},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"msg",
+	)
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "protected-svc", nil)
+	if !appliesToRequestCluster(guard, req) {
+		t.Error("expected ClusterChangeValidator to apply when name is in Names list")
+	}
+}
+
+// TestAppliesToRequestCluster_Names_NoMatch verifies that a names-restricted guard
+// does not apply to a differently-named resource.
+func TestAppliesToRequestCluster_Names_NoMatch(t *testing.T) {
+	guard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services", Names: []string{"protected-svc"}},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"operation == 'DELETE'",
+		"msg",
+	)
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "other-svc", nil)
+	if appliesToRequestCluster(guard, req) {
+		t.Error("ClusterChangeValidator should NOT apply when name is not in Names list")
+	}
+}

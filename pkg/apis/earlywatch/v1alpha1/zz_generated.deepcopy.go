@@ -11,6 +11,69 @@ import (
 
 // DeepCopyInto copies all properties of this object into another object of the
 // same type that is provided as a pointer.
+func (in *ClusterChangeValidator) DeepCopyInto(out *ClusterChangeValidator) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.Spec.DeepCopyInto(&out.Spec)
+	in.Status.DeepCopyInto(&out.Status)
+}
+
+// DeepCopyObject returns a generically typed copy of an object that is in memory.
+// The input object is not touched.
+func (in *ClusterChangeValidator) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopy returns a deep copy of a ClusterChangeValidator.
+func (in *ClusterChangeValidator) DeepCopy() *ClusterChangeValidator {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterChangeValidator)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
+func (in *ClusterChangeValidatorList) DeepCopyInto(out *ClusterChangeValidatorList) {
+	*out = *in
+	out.TypeMeta = in.TypeMeta
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
+	if in.Items != nil {
+		in, out := &in.Items, &out.Items
+		*out = make([]ClusterChangeValidator, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
+	}
+}
+
+// DeepCopyObject returns a generically typed copy of an object that is in memory.
+// The input object is not touched.
+func (in *ClusterChangeValidatorList) DeepCopyObject() runtime.Object {
+	if c := in.DeepCopy(); c != nil {
+		return c
+	}
+	return nil
+}
+
+// DeepCopy returns a deep copy of a ClusterChangeValidatorList.
+func (in *ClusterChangeValidatorList) DeepCopy() *ClusterChangeValidatorList {
+	if in == nil {
+		return nil
+	}
+	out := new(ClusterChangeValidatorList)
+	in.DeepCopyInto(out)
+	return out
+}
+
+// DeepCopyInto copies all properties of this object into another object of the
+// same type that is provided as a pointer.
 func (in *ChangeValidator) DeepCopyInto(out *ChangeValidator) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta

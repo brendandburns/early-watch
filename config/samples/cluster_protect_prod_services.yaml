@@ -1,0 +1,30 @@
+# Example ClusterChangeValidator that prevents deletion of Services in namespaces
+# labelled env=prod across the entire cluster.
+#
+# Unlike a namespaced ChangeValidator, this policy is defined once and
+# automatically applies to every matching namespace without needing a copy per
+# namespace.  The namespaceSelector field restricts the policy to namespaces
+# that carry the label env=prod.
+---
+apiVersion: earlywatch.io/v1alpha1
+kind: ClusterChangeValidator
+metadata:
+  name: protect-prod-services
+spec:
+  subject:
+    apiGroup: ""
+    resource: services
+    namespaceSelector:
+      matchLabels:
+        env: prod
+  operations:
+    - DELETE
+  rules:
+    - name: deny-prod-service-deletion
+      type: ExpressionCheck
+      message: >
+        Deleting Services in production namespaces is not allowed by cluster
+        policy. Remove the env=prod label from the namespace or obtain an
+        explicit approval before proceeding.
+      expressionCheck:
+        expression: "operation == 'DELETE'"

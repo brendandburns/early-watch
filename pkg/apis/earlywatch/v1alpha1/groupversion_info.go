@@ -19,6 +19,7 @@ var (
 
 func init() {
 	SchemeBuilder.Register(&ChangeValidator{}, &ChangeValidatorList{})
+	SchemeBuilder.Register(&ClusterChangeValidator{}, &ClusterChangeValidatorList{})
 	SchemeBuilder.Register(&ManualTouchMonitor{}, &ManualTouchMonitorList{})
 	SchemeBuilder.Register(&ManualTouchEvent{}, &ManualTouchEventList{})
 }

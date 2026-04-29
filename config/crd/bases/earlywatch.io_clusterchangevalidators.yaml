@@ -2,21 +2,21 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: changevalidators.earlywatch.io
+  name: clusterchangevalidators.earlywatch.io
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
 spec:
   group: earlywatch.io
   names:
-    kind: ChangeValidator
-    listKind: ChangeValidatorList
-    plural: changevalidators
-    singular: changevalidator
+    kind: ClusterChangeValidator
+    listKind: ClusterChangeValidatorList
+    plural: clusterchangevalidators
+    singular: clusterchangevalidator
     shortNames:
-      - cv
+      - ccv
     categories:
       - earlywatch
-  scope: Namespaced
+  scope: Cluster
   versions:
     - name: v1alpha1
       served: true
@@ -36,8 +36,8 @@ spec:
       schema:
         openAPIV3Schema:
           description: >
-            ChangeValidator is the Schema for the changevalidators API.
-            A ChangeValidator defines a set of safety rules that the EarlyWatch
+            ClusterChangeValidator is the Schema for the clusterchangevalidators API.
+            A ClusterChangeValidator defines a set of default cluster-wide safety rules that the EarlyWatch
             admission controller evaluates before allowing a change to a
             Kubernetes resource.
           type: object
@@ -56,7 +56,7 @@ spec:
             metadata:
               type: object
             spec:
-              description: ChangeValidatorSpec defines the desired state of ChangeValidator.
+              description: ChangeValidatorSpec defines the desired state of ClusterChangeValidator.
               type: object
               required:
                 - subject
@@ -172,7 +172,7 @@ spec:
                           - NameReferenceCheck
                           - ApprovalCheck
                           - AnnotationCheck
-                          - CheckLock
+                           - CheckLock
                           - ManualTouchCheck
                           - ServicePodSelectorCheck
                       message:
@@ -359,20 +359,6 @@ spec:
                               that the annotation must have. When omitted, any
                               value is accepted as long as the key is present.
                             type: string
-                      checkLock:
-                        description: >
-                          CheckLock optionally configures the CheckLock rule.
-                          When omitted the rule applies only to DELETE
-                          operations (the default behavior).
-                        type: object
-                        properties:
-                          lockOnMutate:
-                            description: >
-                              LockOnMutate, when true, extends the lock check
-                              to UPDATE operations in addition to DELETE
-                              operations. When false or omitted the check only
-                              applies to DELETE requests.
-                            type: boolean
                       manualTouchCheck:
                         description: >
                           ManualTouchCheck denies the request when a recent
@@ -394,6 +380,20 @@ spec:
                               ManualTouchEvent resources are stored. Defaults
                               to "early-watch-system" when omitted.
                             type: string
+                      checkLock:
+                        description: >
+                          CheckLock optionally configures the CheckLock rule.
+                          When omitted the rule applies only to DELETE
+                          operations (the default behavior).
+                        type: object
+                        properties:
+                          lockOnMutate:
+                            description: >
+                              LockOnMutate, when true, extends the lock check
+                              to UPDATE operations in addition to DELETE
+                              operations. When false or omitted the check only
+                              applies to DELETE requests.
+                            type: boolean
                       servicePodSelectorCheck:
                         description: >
                           ServicePodSelectorCheck denies an UPDATE to a Service
@@ -402,45 +402,8 @@ spec:
                           services (spec.clusterIP == "None") are exempt.
                           Required when type is ServicePodSelectorCheck.
                         type: object
-                      dataKeySafetyCheck:
-                        description: >
-                          DataKeySafetyCheck prevents UPDATE requests that
-                          remove a data key from a ConfigMap or Secret when
-                          that specific key is still referenced by another
-                          resource. Required when type is DataKeySafetyCheck.
-                        type: object
-                        properties:
-                          resources:
-                            description: Resources is the list of resource types to scan for key references.
-                            type: array
-                            minItems: 1
-                            items:
-                              type: object
-                              required: ["resource"]
-                              properties:
-                                apiGroup:
-                                  type: string
-                                resource:
-                                  type: string
-                                version:
-                                  type: string
-                                keyReferenceFields:
-                                  type: array
-                                  minItems: 1
-                                  items:
-                                    type: object
-                                    required: ["refPath"]
-                                    properties:
-                                      refPath:
-                                        type: string
-                                      nameSubField:
-                                        type: string
-                                      keySubField:
-                                        type: string
-                          sameNamespace:
-                            type: boolean
             status:
-              description: ChangeValidatorStatus defines the observed state of ChangeValidator.
+              description: ChangeValidatorStatus defines the observed state of ClusterChangeValidator.
               type: object
               properties:
                 conditions:
@@ -499,409 +462,5 @@ spec:
                   description: >
                     ObservedGeneration is the most recent generation that
                     the controller has processed.
-                  type: integer
-                  format: int64
----
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: clusterchangevalidators.earlywatch.io
-  annotations:
-    controller-gen.kubebuilder.io/version: v0.14.0
-spec:
-  group: earlywatch.io
-  names:
-    kind: ClusterChangeValidator
-    listKind: ClusterChangeValidatorList
-    plural: clusterchangevalidators
-    singular: clusterchangevalidator
-    shortNames:
-      - ccv
-    categories:
-      - earlywatch
-  scope: Cluster
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      subresources:
-        status: {}
-      additionalPrinterColumns:
-        - name: Resource
-          type: string
-          jsonPath: .spec.subject.resource
-        - name: Operations
-          type: string
-          jsonPath: .spec.operations
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
-      schema:
-        openAPIV3Schema:
-          description: >
-            ClusterChangeValidator is the Schema for the clusterchangevalidators API.
-            A ClusterChangeValidator defines a set of default cluster-wide safety
-            rules that the EarlyWatch admission controller evaluates before allowing
-            a change to a Kubernetes resource. Unlike the namespaced ChangeValidator,
-            a ClusterChangeValidator applies across all namespaces unless restricted
-            by the subject's namespaceSelector field.
-          type: object
-          properties:
-            apiVersion:
-              description: >
-                APIVersion defines the versioned schema of this representation
-                of an object. Servers should convert recognized schemas to the
-                latest internal value, and may reject unrecognized values.
-              type: string
-            kind:
-              description: >
-                Kind is a string value representing the REST resource this
-                object represents.
-              type: string
-            metadata:
-              type: object
-            spec:
-              description: ChangeValidatorSpec defines the desired state of ClusterChangeValidator.
-              type: object
-              required:
-                - subject
-                - operations
-                - rules
-              properties:
-                subject:
-                  description: >
-                    Subject describes the Kubernetes resource that this guard
-                    watches.
-                  type: object
-                  required:
-                    - resource
-                  properties:
-                    apiGroup:
-                      description: >
-                        APIGroup is the API group for the resource, e.g. ""
-                        for core, "apps" for Deployments.
-                      type: string
-                    resource:
-                      description: >
-                        Resource is the plural resource name, e.g. "services",
-                        "deployments".
-                      type: string
-                    names:
-                      description: >
-                        Names optionally restricts this guard to only resources
-                        whose name is in the list. When omitted the guard
-                        applies to all resources of the given type.
-                      type: array
-                      items:
-                        type: string
-                    namespaceSelector:
-                      description: >
-                        NamespaceSelector optionally restricts this guard to
-                        namespaces that match the given label selector. When
-                        omitted the guard applies to all namespaces. This field
-                        is the primary mechanism for targeting specific
-                        namespaces with a cluster-wide policy.
-                      type: object
-                      properties:
-                        matchExpressions:
-                          description: matchExpressions is a list of label selector requirements.
-                          type: array
-                          items:
-                            description: >
-                              A label selector requirement is a selector that
-                              contains values, a key, and an operator that
-                              relates the key and values.
-                            type: object
-                            required:
-                              - key
-                              - operator
-                            properties:
-                              key:
-                                description: key is the label key that the selector applies to.
-                                type: string
-                              operator:
-                                description: >
-                                  operator represents a key's relationship to
-                                  a set of values.
-                                type: string
-                              values:
-                                description: values is an array of string values.
-                                type: array
-                                items:
-                                  type: string
-                        matchLabels:
-                          description: >
-                            matchLabels is a map of {key,value} pairs. A
-                            single {key,value} in the matchLabels map is
-                            equivalent to an element of matchExpressions.
-                          type: object
-                          additionalProperties:
-                            type: string
-                operations:
-                  description: >
-                    Operations is the list of admission operations this guard
-                    intercepts. Valid values are: CREATE, UPDATE, DELETE,
-                    CONNECT.
-                  type: array
-                  minItems: 1
-                  items:
-                    description: OperationType represents a Kubernetes admission operation.
-                    type: string
-                    enum:
-                      - CREATE
-                      - UPDATE
-                      - DELETE
-                      - CONNECT
-                rules:
-                  description: >
-                    Rules is the list of safety checks to evaluate when an
-                    intercepted operation is received. All rules are
-                    evaluated; if any rule is violated the request is denied.
-                  type: array
-                  minItems: 1
-                  items:
-                    description: GuardRule is a single safety check within a ClusterChangeValidator.
-                    type: object
-                    required:
-                      - name
-                      - type
-                      - message
-                    properties:
-                      name:
-                        description: Name is a human-readable identifier for this rule.
-                        type: string
-                      type:
-                        description: Type selects the kind of check to perform.
-                        type: string
-                        enum:
-                          - ExistingResources
-                          - ExpressionCheck
-                          - NameReferenceCheck
-                          - ApprovalCheck
-                          - AnnotationCheck
-                          - CheckLock
-                          - ManualTouchCheck
-                          - ServicePodSelectorCheck
-                          - DataKeySafetyCheck
-                      message:
-                        description: >
-                          Message is the human-readable denial message
-                          returned to the user when this rule is violated.
-                        type: string
-                      existingResources:
-                        description: >
-                          ExistingResources configures a check that queries
-                          the cluster for resources related to the subject
-                          and denies the request when any matching resources
-                          are found. Required when type is ExistingResources.
-                        type: object
-                        required:
-                          - resource
-                        properties:
-                          apiGroup:
-                            type: string
-                          resource:
-                            type: string
-                          labelSelectorFromField:
-                            type: string
-                          labelSelector:
-                            type: object
-                            properties:
-                              matchExpressions:
-                                type: array
-                                items:
-                                  type: object
-                                  required:
-                                    - key
-                                    - operator
-                                  properties:
-                                    key:
-                                      type: string
-                                    operator:
-                                      type: string
-                                    values:
-                                      type: array
-                                      items:
-                                        type: string
-                              matchLabels:
-                                type: object
-                                additionalProperties:
-                                  type: string
-                          sameNamespace:
-                            type: boolean
-                            default: true
-                      expressionCheck:
-                        description: >
-                          ExpressionCheck evaluates a CEL expression against
-                          the admission request and denies the request when
-                          the expression returns true. Required when type is
-                          ExpressionCheck.
-                        type: object
-                        required:
-                          - expression
-                        properties:
-                          expression:
-                            type: string
-                      nameReferenceCheck:
-                        description: >
-                          NameReferenceCheck checks whether the subject
-                          resource is referenced by name in other cluster
-                          resources. Required when type is NameReferenceCheck.
-                        type: object
-                        required:
-                          - resources
-                        properties:
-                          resources:
-                            type: array
-                            minItems: 1
-                            items:
-                              type: object
-                              required:
-                                - resource
-                                - nameFields
-                              properties:
-                                apiGroup:
-                                  type: string
-                                resource:
-                                  type: string
-                                version:
-                                  type: string
-                                nameFields:
-                                  type: array
-                                  minItems: 1
-                                  items:
-                                    type: string
-                          sameNamespace:
-                            type: boolean
-                            default: true
-                      approvalCheck:
-                        description: >
-                          ApprovalCheck verifies that the resource carries a
-                          valid approval annotation. Required when type is
-                          ApprovalCheck.
-                        type: object
-                        required:
-                          - publicKey
-                        properties:
-                          publicKey:
-                            type: string
-                          annotationKey:
-                            type: string
-                          changeAnnotationKey:
-                            type: string
-                      annotationCheck:
-                        description: >
-                          AnnotationCheck denies the request when the subject
-                          resource does not carry a required annotation.
-                          Required when type is AnnotationCheck.
-                        type: object
-                        required:
-                          - annotationKey
-                        properties:
-                          annotationKey:
-                            type: string
-                          annotationValue:
-                            type: string
-                      checkLock:
-                        description: >
-                          CheckLock optionally configures the CheckLock rule.
-                        type: object
-                        properties:
-                          lockOnMutate:
-                            type: boolean
-                      manualTouchCheck:
-                        description: >
-                          ManualTouchCheck denies the request when a recent
-                          manual touch has been recorded. Required when type
-                          is ManualTouchCheck.
-                        type: object
-                        properties:
-                          windowDuration:
-                            type: string
-                          eventNamespace:
-                            type: string
-                      servicePodSelectorCheck:
-                        description: >
-                          ServicePodSelectorCheck denies a Service UPDATE when
-                          it would drop all pod references. Required when type
-                          is ServicePodSelectorCheck.
-                        type: object
-                      dataKeySafetyCheck:
-                        description: >
-                          DataKeySafetyCheck prevents UPDATE requests that
-                          remove a data key still referenced by another
-                          resource. Required when type is DataKeySafetyCheck.
-                        type: object
-                        properties:
-                          resources:
-                            type: array
-                            minItems: 1
-                            items:
-                              type: object
-                              required: ["resource"]
-                              properties:
-                                apiGroup:
-                                  type: string
-                                resource:
-                                  type: string
-                                version:
-                                  type: string
-                                keyReferenceFields:
-                                  type: array
-                                  minItems: 1
-                                  items:
-                                    type: object
-                                    required: ["refPath"]
-                                    properties:
-                                      refPath:
-                                        type: string
-                                      nameSubField:
-                                        type: string
-                                      keySubField:
-                                        type: string
-                          sameNamespace:
-                            type: boolean
-            status:
-              description: ChangeValidatorStatus defines the observed state of ClusterChangeValidator.
-              type: object
-              properties:
-                conditions:
-                  type: array
-                  items:
-                    description: Condition contains details for one aspect of the current state of this API Resource.
-                    type: object
-                    required:
-                      - lastTransitionTime
-                      - message
-                      - reason
-                      - status
-                      - type
-                    properties:
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      message:
-                        type: string
-                        maxLength: 32768
-                      observedGeneration:
-                        type: integer
-                        format: int64
-                        minimum: 0
-                      reason:
-                        type: string
-                        maxLength: 1024
-                        minLength: 1
-                        pattern: '^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$'
-                      status:
-                        type: string
-                        enum:
-                          - "True"
-                          - "False"
-                          - Unknown
-                      type:
-                        type: string
-                        maxLength: 316
-                        pattern: '^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$'
-                observedGeneration:
                   type: integer
                   format: int64

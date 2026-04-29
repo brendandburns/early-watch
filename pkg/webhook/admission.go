@@ -17,9 +17,11 @@ import (
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -91,6 +93,51 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 		}
 	}
 
+	// List all ClusterChangeValidators and evaluate those that match the
+	// request's namespace via their subject's NamespaceSelector.
+	clusterValidatorList := &ewv1alpha1.ClusterChangeValidatorList{}
+	if err := h.Client.List(ctx, clusterValidatorList); err != nil {
+		logger.Error(err, "Failed to list ClusterChangeValidators")
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+
+	for _, guard := range clusterValidatorList.Items {
+		if !appliesToRequestCluster(&guard, req) {
+			continue
+		}
+
+		// Evaluate NamespaceSelector: skip this guard when the request's
+		// namespace does not match the selector.
+		if guard.Spec.Subject.NamespaceSelector != nil && req.Namespace != "" {
+			matches, err := h.namespaceMatchesSelector(ctx, req.Namespace, guard.Spec.Subject.NamespaceSelector)
+			if err != nil {
+				logger.Error(err, "Failed to evaluate NamespaceSelector", "guard", guard.Name)
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			if !matches {
+				continue
+			}
+		}
+
+		logger.Info("Evaluating ClusterChangeValidator", "guard", guard.Name)
+
+		for _, rule := range guard.Spec.Rules {
+			violated, message, err := h.evaluateRule(ctx, rule, req)
+			if err != nil {
+				logger.Error(err, "Error evaluating rule", "rule", rule.Name)
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			if violated {
+				logger.Info("Request denied by ClusterChangeValidator rule",
+					"guard", guard.Name,
+					"rule", rule.Name,
+					"message", message,
+				)
+				return admission.Denied(message)
+			}
+		}
+	}
+
 	return admission.Allowed("no ChangeValidator rules violated")
 }
 
@@ -128,6 +175,66 @@ func appliesToRequest(guard *ewv1alpha1.ChangeValidator, req admission.Request) 
 		}
 	}
 	return false
+}
+
+// appliesToRequestCluster returns true when the ClusterChangeValidator matches
+// the admission request's resource type, operation, and (optionally) names.
+// Namespace selector matching is handled separately by the caller.
+func appliesToRequestCluster(guard *ewv1alpha1.ClusterChangeValidator, req admission.Request) bool {
+	subj := guard.Spec.Subject
+
+	// Match API group.
+	if subj.APIGroup != req.Resource.Group {
+		return false
+	}
+
+	// Match resource kind.
+	if !strings.EqualFold(subj.Resource, req.Resource.Resource) {
+		return false
+	}
+
+	// Match specific resource names when the guard is scoped to a list of names.
+	if len(subj.Names) > 0 {
+		nameSet := make(map[string]struct{}, len(subj.Names))
+		for _, n := range subj.Names {
+			nameSet[n] = struct{}{}
+		}
+		if _, ok := nameSet[req.Name]; !ok {
+			return false
+		}
+	}
+
+	// Match operation.
+	for _, op := range guard.Spec.Operations {
+		if admissionv1.Operation(op) == req.Operation {
+			return true
+		}
+	}
+	return false
+}
+
+// namespaceMatchesSelector fetches the Namespace object and evaluates the
+// LabelSelector against its labels.  Returns true when the selector is nil
+// (match all) or when the namespace's labels satisfy the selector.
+func (h *AdmissionHandler) namespaceMatchesSelector(ctx context.Context, namespace string, sel *metav1.LabelSelector) (bool, error) {
+	if sel == nil {
+		return true, nil
+	}
+	if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
+		return true, nil
+	}
+
+	selector, err := metav1.LabelSelectorAsSelector(sel)
+	if err != nil {
+		return false, fmt.Errorf("converting namespace selector: %w", err)
+	}
+
+	var ns corev1.Namespace
+	if err := h.Client.Get(ctx, types.NamespacedName{Name: namespace}, &ns); err != nil {
+		return false, fmt.Errorf("getting namespace %q: %w", namespace, err)
+	}
+
+	return selector.Matches(labels.Set(ns.Labels)), nil
 }
 
 // evaluateRule evaluates a single GuardRule against the admission request.
