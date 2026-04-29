@@ -3408,3 +3408,103 @@ func TestHandle_ClusterValidatorMoreRestrictive(t *testing.T) {
 		t.Errorf("expected denial message from cluster-level guard, got: %v", resp.Result)
 	}
 }
+
+// TestHandle_BothDeleteValidators_PassClusterFailNamespace verifies that when both
+// a ClusterChangeValidator and a ChangeValidator match DELETE on the same resource
+// but have different expression rules, a request that passes the cluster rule but
+// triggers the namespace rule is correctly denied by the namespace-level validator.
+func TestHandle_BothDeleteValidators_PassClusterFailNamespace(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	// Cluster rule: only denies resources named "cluster-protected-svc".
+	// The request uses "my-svc", so this expression evaluates to false → cluster allows.
+	clusterGuard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"name == 'cluster-protected-svc'",
+		"cluster policy: only cluster-protected-svc is protected",
+	)
+
+	// Namespace rule: denies resources named "my-svc".
+	// The request uses "my-svc", so this expression evaluates to true → namespace denies.
+	nsGuard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "deny-my-svc",
+					Type:    ewv1alpha1.RuleTypeExpressionCheck,
+					Message: "namespace policy: my-svc deletion not allowed",
+					ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+						Expression: "name == 'my-svc'",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(clusterGuard, nsGuard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected request to be denied by namespace-level ChangeValidator")
+	}
+	if resp.Result == nil || resp.Result.Message != "namespace policy: my-svc deletion not allowed" {
+		t.Errorf("expected denial message from namespace-level guard, got: %v", resp.Result)
+	}
+}
+
+// TestHandle_BothDeleteValidators_PassNamespaceFailCluster verifies that when both
+// a ClusterChangeValidator and a ChangeValidator match DELETE on the same resource
+// but have different expression rules, a request that passes the namespace rule but
+// triggers the cluster rule is correctly denied by the cluster-level validator.
+func TestHandle_BothDeleteValidators_PassNamespaceFailCluster(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	// Cluster rule: denies resources named "my-svc".
+	// The request uses "my-svc", so this expression evaluates to true → cluster denies.
+	clusterGuard := newClusterGuard(
+		ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+		[]ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+		"name == 'my-svc'",
+		"cluster policy: my-svc deletion not allowed cluster-wide",
+	)
+
+	// Namespace rule: only denies resources named "ns-protected-svc".
+	// The request uses "my-svc", so this expression evaluates to false → namespace allows.
+	nsGuard := &ewv1alpha1.ChangeValidator{
+		ObjectMeta: metav1.ObjectMeta{Name: "ns-guard", Namespace: "default"},
+		Spec: ewv1alpha1.ChangeValidatorSpec{
+			Subject:    ewv1alpha1.SubjectResource{APIGroup: "", Resource: "services"},
+			Operations: []ewv1alpha1.OperationType{ewv1alpha1.OperationDelete},
+			Rules: []ewv1alpha1.GuardRule{
+				{
+					Name:    "deny-ns-protected-svc",
+					Type:    ewv1alpha1.RuleTypeExpressionCheck,
+					Message: "namespace policy: only ns-protected-svc is protected",
+					ExpressionCheck: &ewv1alpha1.ExpressionCheck{
+						Expression: "name == 'ns-protected-svc'",
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(clusterGuard, nsGuard).Build()
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme)
+	h := &AdmissionHandler{Client: fakeClient, DynamicClient: fakeDynamic}
+
+	req := makeRequest(admissionv1.Delete, "", "services", "default", "my-svc", nil)
+	resp := h.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Error("expected request to be denied by cluster-level ClusterChangeValidator")
+	}
+	if resp.Result == nil || resp.Result.Message != "cluster policy: my-svc deletion not allowed cluster-wide" {
+		t.Errorf("expected denial message from cluster-level guard, got: %v", resp.Result)
+	}
+}
