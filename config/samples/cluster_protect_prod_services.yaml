@@ -1,5 +1,5 @@
 # Example ClusterChangeValidator that prevents deletion of Services in namespaces
-# labelled env=prod across the entire cluster.
+# labeled env=prod across the entire cluster.
 #
 # Unlike a namespaced ChangeValidator, this policy is defined once and
 # automatically applies to every matching namespace without needing a copy per
