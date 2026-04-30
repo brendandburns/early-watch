@@ -20,7 +20,8 @@ User/CI → kubectl delete service my-svc
               ▼
     EarlyWatch Webhook
               │
-              │ lists ChangeValidator rules for "services"
+              │ lists ChangeValidator rules for "services" (same namespace)
+              │ lists ClusterChangeValidator rules for "services" (all namespaces)
               │ queries cluster for matching Pods
               ▼
     DENY: "This Service cannot be deleted because Pods that
@@ -60,6 +61,7 @@ See [docs/getting-started.md](docs/getting-started.md) for a full walkthrough.
 | `ExpressionCheck` | Denies a request when a configured expression against operation/namespace/name evaluates to true. | [docs/examples/expression-check.yaml](docs/examples/expression-check.yaml) |
 | `ManualTouchCheck` | Denies a request when a recent manual touch event exists within the configured time window. | [docs/examples/manual-touch-check.yaml](docs/examples/manual-touch-check.yaml) |
 | `ServicePodSelectorCheck` | Denies a Service UPDATE when the old selector matched Pods but the new selector would match none. | [docs/examples/service-pod-selector-check.yaml](docs/examples/service-pod-selector-check.yaml) |
+| `ClusterChangeValidator` | Applies any rule type cluster-wide across all namespaces (optionally filtered by `namespaceSelector`). | [docs/examples/cluster-change-validator.yaml](docs/examples/cluster-change-validator.yaml) |
 
 ---
 
@@ -81,6 +83,7 @@ bash scripts/demo.sh --demos=<key>
 | `ExpressionCheck` | `expression` | `scripts/demo-expression-check.sh` |
 | `ManualTouchCheck` | `manualtouch` | `scripts/demo-manual-touch-check.sh` |
 | `ServicePodSelectorCheck` | `servicepodselector` | `scripts/demo-service-pod-selector-check.sh` |
+| `ClusterChangeValidator` | `clustervalidator` | `scripts/demo-cluster-change-validator.sh` |
 
 ---
 
@@ -89,6 +92,7 @@ bash scripts/demo.sh --demos=<key>
 | Getting started | [docs/getting-started.md](docs/getting-started.md) |
 | Architecture and source tree | [docs/architecture.md](docs/architecture.md) |
 | ChangeValidator CRD reference | [docs/custom-resources/change-validator.md](docs/custom-resources/change-validator.md) |
+| ClusterChangeValidator CRD reference | [docs/custom-resources/cluster-change-validator.md](docs/custom-resources/cluster-change-validator.md) |
 | ManualTouchMonitor CRD reference | [docs/custom-resources/manual-touch-monitor.md](docs/custom-resources/manual-touch-monitor.md) |
 | Rule types | [docs/rule-types/](docs/rule-types/) |
 | CLI reference (watchctl) | [docs/cli/watchctl.md](docs/cli/watchctl.md) |

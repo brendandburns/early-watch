@@ -18,7 +18,8 @@ User/CI → kubectl delete service my-svc
               ▼
     EarlyWatch Webhook
               │
-              ├─ lists ChangeValidators for "services" + "DELETE"
+              ├─ lists ChangeValidators for "services" + "DELETE" (same namespace)
+              ├─ lists ClusterChangeValidators for "services" + "DELETE" (all namespaces)
               │
               ├─ evaluates rules against cluster state
               │     (e.g. queries matching Pods)
@@ -35,11 +36,12 @@ EarlyWatch also ships an **audit monitor** component (`cmd/audit-monitor`) that 
 
 ## Custom Resources
 
-EarlyWatch introduces three custom resource types in the `earlywatch.io/v1alpha1` API group:
+EarlyWatch introduces four custom resource types in the `earlywatch.io/v1alpha1` API group:
 
 | Kind | Short name | Scope | Purpose |
 |------|-----------|-------|---------|
-| `ChangeValidator` | `cv` | Namespaced | Defines the resources to protect and the rules to enforce. |
+| `ChangeValidator` | `cv` | Namespaced | Defines the resources to protect and the rules to enforce within a single namespace. |
+| `ClusterChangeValidator` | `ccv` | Cluster | Defines cluster-wide safety rules that apply across all namespaces (optionally restricted by `namespaceSelector`). |
 | `ManualTouchMonitor` | `mtm` | Namespaced | Declares which resources and operations the audit monitor should watch for manual touches. |
 | `ManualTouchEvent` | `mte` | Namespaced | Records a single detected manual touch; written by the audit monitor. |
 
@@ -81,7 +83,9 @@ early-watch/
 
 1. The API server sends an `AdmissionReview` request to the webhook.
 2. The webhook handler (`pkg/webhook/admission.go`) extracts the resource group, version, and resource name from the request.
-3. It lists all `ChangeValidator` objects in the cluster whose `spec.subject` matches the incoming resource and whose `spec.operations` includes the current operation.
+3. It lists all `ChangeValidator` objects in the same namespace as the subject resource whose `spec.subject` matches the incoming resource and whose `spec.operations` includes the current operation.
 4. Optional filters (`subject.names`, `subject.namespaceSelector`) are applied.
-5. Each matching `ChangeValidator`'s rules are evaluated in order.  The first rule violation produces a denial response; if all rules pass, the request is allowed.
-6. The denial message is returned verbatim to the user via `kubectl` or the API client.
+5. Each matching `ChangeValidator`'s rules are evaluated in order.  The first rule violation produces a denial response; if all rules pass, the webhook continues.
+6. It then lists all `ClusterChangeValidator` objects and evaluates those whose `spec.subject` matches the request.  When a `namespaceSelector` is present the webhook fetches the namespace's labels and skips validators that do not match.
+7. The first rule violation across any `ClusterChangeValidator` produces a denial response; if all pass, the request is allowed.
+8. The denial message is returned verbatim to the user via `kubectl` or the API client.

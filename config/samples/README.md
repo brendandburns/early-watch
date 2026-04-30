@@ -67,9 +67,15 @@ Two cluster-scoped examples of namespace protection:
 watchctl add config/samples/protect_namespace_from_deletion.yaml
 ```
 
-### `protect_kube_system_from_deletion.yaml`
+### `cluster_protect_prod_services.yaml`
 
-Prevents the `kube-system` namespace from being deleted unless the operator has first added an explicit confirmation annotation:
+A `ClusterChangeValidator` that prevents deletion of Services in any namespace labelled `env=prod`, across the entire cluster.  Unlike a namespaced `ChangeValidator`, this policy is defined once and automatically covers every matching namespace without requiring a copy per namespace.
+
+```bash
+watchctl add config/samples/cluster_protect_prod_services.yaml
+```
+
+### `protect_kube_system_from_deletion.yaml` unless the operator has first added an explicit confirmation annotation:
 
 ```bash
 kubectl annotate namespace kube-system earlywatch.io/confirm-delete=true
