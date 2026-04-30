@@ -26,6 +26,24 @@ rules:
       - get
       - patch
       - update
+  # Read ClusterChangeValidator custom resources to evaluate cluster-wide rules.
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - clusterchangevalidators
+    verbs:
+      - get
+      - list
+      - watch
+  # Update ClusterChangeValidator status subresource.
+  - apiGroups:
+      - earlywatch.io
+    resources:
+      - clusterchangevalidators/status
+    verbs:
+      - get
+      - patch
+      - update
   # Read any resource so the ExistingResources check can query the cluster.
   - apiGroups:
       - "*"

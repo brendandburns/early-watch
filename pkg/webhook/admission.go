@@ -17,9 +17,11 @@ import (
 	"time"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -91,6 +93,81 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 		}
 	}
 
+	// List all ClusterChangeValidators and evaluate those that match the
+	// request's namespace via their subject's NamespaceSelector.
+	clusterValidatorList := &ewv1alpha1.ClusterChangeValidatorList{}
+	if err := h.Client.List(ctx, clusterValidatorList); err != nil {
+		logger.Error(err, "Failed to list ClusterChangeValidators")
+		return admission.Errored(http.StatusInternalServerError, err)
+	}
+
+	// effectiveNamespace is used for NamespaceSelector evaluation.  For
+	// namespaced resources req.Namespace is the namespace of the subject.
+	// For Namespace-resource requests (e.g. Namespace CREATE/UPDATE/DELETE),
+	// req.Namespace is empty and req.Name holds the target namespace name.
+	// For other cluster-scoped resources where req.Namespace is empty, there
+	// is no identifiable namespace so any NamespaceSelector will not match.
+	effectiveNamespace := req.Namespace
+	if effectiveNamespace == "" && strings.EqualFold(req.Resource.Resource, "namespaces") {
+		effectiveNamespace = req.Name
+	}
+
+	// nsLabels caches the labels of effectiveNamespace so that the Namespace
+	// object is fetched at most once across all ClusterChangeValidator guards.
+	var nsLabels labels.Set
+	nsLabelsFetched := false
+
+	for _, guard := range clusterValidatorList.Items {
+		if !appliesToRequestCluster(&guard, req) {
+			continue
+		}
+
+		// Evaluate NamespaceSelector when the guard has one configured.
+		if sel := guard.Spec.Subject.NamespaceSelector; sel != nil {
+			if len(sel.MatchLabels) > 0 || len(sel.MatchExpressions) > 0 {
+				// When no namespace is identifiable, a non-empty selector cannot match.
+				if effectiveNamespace == "" {
+					continue
+				}
+				if !nsLabelsFetched {
+					var ns corev1.Namespace
+					if err := h.Client.Get(ctx, types.NamespacedName{Name: effectiveNamespace}, &ns); err != nil {
+						logger.Error(err, "Failed to fetch namespace labels", "namespace", effectiveNamespace)
+						return admission.Errored(http.StatusInternalServerError, err)
+					}
+					nsLabels = labels.Set(ns.Labels)
+					nsLabelsFetched = true
+				}
+				selector, err := metav1.LabelSelectorAsSelector(sel)
+				if err != nil {
+					logger.Error(err, "Failed to evaluate NamespaceSelector", "guard", guard.Name)
+					return admission.Errored(http.StatusInternalServerError, err)
+				}
+				if !selector.Matches(nsLabels) {
+					continue
+				}
+			}
+		}
+
+		logger.Info("Evaluating ClusterChangeValidator", "guard", guard.Name)
+
+		for _, rule := range guard.Spec.Rules {
+			violated, message, err := h.evaluateRule(ctx, rule, req)
+			if err != nil {
+				logger.Error(err, "Error evaluating rule", "rule", rule.Name)
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			if violated {
+				logger.Info("Request denied by ClusterChangeValidator rule",
+					"guard", guard.Name,
+					"rule", rule.Name,
+					"message", message,
+				)
+				return admission.Denied(message)
+			}
+		}
+	}
+
 	return admission.Allowed("no ChangeValidator rules violated")
 }
 
@@ -111,6 +188,42 @@ func appliesToRequest(guard *ewv1alpha1.ChangeValidator, req admission.Request) 
 	}
 
 	// Match specific resource names if the guard is scoped to a list of names.
+	if len(subj.Names) > 0 {
+		nameSet := make(map[string]struct{}, len(subj.Names))
+		for _, n := range subj.Names {
+			nameSet[n] = struct{}{}
+		}
+		if _, ok := nameSet[req.Name]; !ok {
+			return false
+		}
+	}
+
+	// Match operation.
+	for _, op := range guard.Spec.Operations {
+		if admissionv1.Operation(op) == req.Operation {
+			return true
+		}
+	}
+	return false
+}
+
+// appliesToRequestCluster returns true when the ClusterChangeValidator matches
+// the admission request's resource type, operation, and (optionally) names.
+// Namespace selector matching is handled separately by the caller.
+func appliesToRequestCluster(guard *ewv1alpha1.ClusterChangeValidator, req admission.Request) bool {
+	subj := guard.Spec.Subject
+
+	// Match API group.
+	if subj.APIGroup != req.Resource.Group {
+		return false
+	}
+
+	// Match resource kind.
+	if !strings.EqualFold(subj.Resource, req.Resource.Resource) {
+		return false
+	}
+
+	// Match specific resource names when the guard is scoped to a list of names.
 	if len(subj.Names) > 0 {
 		nameSet := make(map[string]struct{}, len(subj.Names))
 		for _, n := range subj.Names {
