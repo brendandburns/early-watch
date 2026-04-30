@@ -733,10 +733,12 @@ spec:
                             default: true
                       expressionCheck:
                         description: >
-                          ExpressionCheck evaluates a CEL expression against
-                          the admission request and denies the request when
-                          the expression returns true. Required when type is
-                          ExpressionCheck.
+                          ExpressionCheck evaluates a simple equality
+                          expression against the admission request and
+                          denies the request when the expression matches.
+                          Supported syntax is limited to `field == value`;
+                          CEL and other operators are not supported.
+                          Required when type is ExpressionCheck.
                         type: object
                         required:
                           - expression
