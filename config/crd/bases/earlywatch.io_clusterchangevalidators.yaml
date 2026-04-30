@@ -247,20 +247,20 @@ spec:
                             default: true
                       expressionCheck:
                         description: >
-                          ExpressionCheck evaluates a CEL expression against
-                          the admission request and denies the request when
-                          the expression returns true. Required when type is
-                          ExpressionCheck.
+                          ExpressionCheck evaluates a simple field equality
+                          expression against the admission request and denies
+                          the request when the expression returns true.
+                          Required when type is ExpressionCheck.
                         type: object
                         required:
                           - expression
                         properties:
                           expression:
                             description: >
-                              Expression is a Common Expression Language
-                              (CEL) expression. The expression receives the
-                              admission request object as "request" and must
-                              return a boolean. When true, the request is
+                              Expression is a simple equality check of the
+                              form "field == 'value'". Supported fields are
+                              "operation", "namespace", and "name". When the
+                              expression evaluates to true, the request is
                               denied.
                             type: string
                       nameReferenceCheck:

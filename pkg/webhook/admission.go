@@ -101,21 +101,51 @@ func (h *AdmissionHandler) Handle(ctx context.Context, req admission.Request) ad
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
+	// effectiveNamespace is used for NamespaceSelector evaluation.  For
+	// namespaced resources req.Namespace is the namespace of the subject.
+	// For Namespace-resource requests (e.g. Namespace CREATE/UPDATE/DELETE),
+	// req.Namespace is empty and req.Name holds the target namespace name.
+	// For other cluster-scoped resources where req.Namespace is empty, there
+	// is no identifiable namespace so any NamespaceSelector will not match.
+	effectiveNamespace := req.Namespace
+	if effectiveNamespace == "" && strings.EqualFold(req.Resource.Resource, "namespaces") {
+		effectiveNamespace = req.Name
+	}
+
+	// nsLabels caches the labels of effectiveNamespace so that the Namespace
+	// object is fetched at most once across all ClusterChangeValidator guards.
+	var nsLabels labels.Set
+	nsLabelsFetched := false
+
 	for _, guard := range clusterValidatorList.Items {
 		if !appliesToRequestCluster(&guard, req) {
 			continue
 		}
 
-		// Evaluate NamespaceSelector: skip this guard when the request's
-		// namespace does not match the selector.
-		if guard.Spec.Subject.NamespaceSelector != nil && req.Namespace != "" {
-			matches, err := h.namespaceMatchesSelector(ctx, req.Namespace, guard.Spec.Subject.NamespaceSelector)
-			if err != nil {
-				logger.Error(err, "Failed to evaluate NamespaceSelector", "guard", guard.Name)
-				return admission.Errored(http.StatusInternalServerError, err)
-			}
-			if !matches {
-				continue
+		// Evaluate NamespaceSelector when the guard has one configured.
+		if sel := guard.Spec.Subject.NamespaceSelector; sel != nil {
+			if len(sel.MatchLabels) > 0 || len(sel.MatchExpressions) > 0 {
+				// When no namespace is identifiable, a non-empty selector cannot match.
+				if effectiveNamespace == "" {
+					continue
+				}
+				if !nsLabelsFetched {
+					var ns corev1.Namespace
+					if err := h.Client.Get(ctx, types.NamespacedName{Name: effectiveNamespace}, &ns); err != nil {
+						logger.Error(err, "Failed to fetch namespace labels", "namespace", effectiveNamespace)
+						return admission.Errored(http.StatusInternalServerError, err)
+					}
+					nsLabels = labels.Set(ns.Labels)
+					nsLabelsFetched = true
+				}
+				selector, err := metav1.LabelSelectorAsSelector(sel)
+				if err != nil {
+					logger.Error(err, "Failed to evaluate NamespaceSelector", "guard", guard.Name)
+					return admission.Errored(http.StatusInternalServerError, err)
+				}
+				if !selector.Matches(nsLabels) {
+					continue
+				}
 			}
 		}
 
@@ -211,30 +241,6 @@ func appliesToRequestCluster(guard *ewv1alpha1.ClusterChangeValidator, req admis
 		}
 	}
 	return false
-}
-
-// namespaceMatchesSelector fetches the Namespace object and evaluates the
-// LabelSelector against its labels.  Returns true when the selector is nil
-// (match all) or when the namespace's labels satisfy the selector.
-func (h *AdmissionHandler) namespaceMatchesSelector(ctx context.Context, namespace string, sel *metav1.LabelSelector) (bool, error) {
-	if sel == nil {
-		return true, nil
-	}
-	if len(sel.MatchLabels) == 0 && len(sel.MatchExpressions) == 0 {
-		return true, nil
-	}
-
-	selector, err := metav1.LabelSelectorAsSelector(sel)
-	if err != nil {
-		return false, fmt.Errorf("converting namespace selector: %w", err)
-	}
-
-	var ns corev1.Namespace
-	if err := h.Client.Get(ctx, types.NamespacedName{Name: namespace}, &ns); err != nil {
-		return false, fmt.Errorf("getting namespace %q: %w", namespace, err)
-	}
-
-	return selector.Matches(labels.Set(ns.Labels)), nil
 }
 
 // evaluateRule evaluates a single GuardRule against the admission request.
