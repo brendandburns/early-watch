@@ -226,7 +226,7 @@ func cleanupNamespace(t *testing.T) {
 	for time.Now().Before(deadline) {
 		nsList := &ewv1alpha1.ChangeValidatorList{}
 		clList := &ewv1alpha1.ClusterChangeValidatorList{}
-		nsGone := k8sClient.List(ctx, nsList, client.InNamespace(testNamespace)) == nil && len(nsList.Items) == 0
+		nsGone := k8sClient.List(ctx, nsList) == nil && len(nsList.Items) == 0
 		clGone := k8sClient.List(ctx, clList) == nil && len(clList.Items) == 0
 		if nsGone && clGone {
 			break
