@@ -75,7 +75,9 @@ A `ClusterChangeValidator` that prevents deletion of Services in any namespace l
 watchctl add config/samples/cluster_protect_prod_services.yaml
 ```
 
-### `protect_kube_system_from_deletion.yaml` unless the operator has first added an explicit confirmation annotation:
+### `protect_kube_system_from_deletion.yaml`
+
+Prevents the `kube-system` namespace from being deleted unless the operator has first added an explicit confirmation annotation:
 
 ```bash
 kubectl annotate namespace kube-system earlywatch.io/confirm-delete=true

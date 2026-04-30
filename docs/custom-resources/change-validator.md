@@ -10,7 +10,7 @@ API group: `earlywatch.io/v1alpha1`
 Short name: `cv`  
 Scope: Namespaced
 
-> **Need cluster-wide coverage?**  Use [`ClusterChangeValidator`](cluster-change-validator.md) instead.  It shares the same `spec` schema but applies across all namespaces without requiring a copy per namespace.
+> **Need cluster-wide coverage?** Use [`ClusterChangeValidator`](cluster-change-validator.md) instead. It shares the same `spec` schema but applies across all namespaces without requiring a copy per namespace.
 
 ---
 
