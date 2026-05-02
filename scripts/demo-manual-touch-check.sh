@@ -109,10 +109,24 @@ pause
 
 print_step "1e - Deleting event and retrying UPDATE..."
 run_cmd kubectl delete manualtouchevent "$DEMO_MANUAL_EVENT" -n "$EVENT_NS" --ignore-not-found=true
+RETRY_UPDATE_SUCCEEDED=false
 print_cmd "kubectl scale deployment $DEMO_MANUAL_DEPLOY -n $DEMO_NS --replicas=2"
 if kubectl scale deployment "$DEMO_MANUAL_DEPLOY" -n "$DEMO_NS" --replicas=2 2>&1; then
+  RETRY_UPDATE_SUCCEEDED=true
   print_success "Deployment update succeeded after removing the event."
 else
   print_error "Update still denied. Verify event cleanup and retry."
+  print_info "Skipping cleanup so the ChangeValidator and Deployment remain available for a retry."
 fi
 pause
+
+if [ "$RETRY_UPDATE_SUCCEEDED" = true ]; then
+  print_step "1f - Cleaning up..."
+  run_cmd kubectl delete changevalidator "$DEMO_MANUAL_CV" -n "$DEMO_NS" --ignore-not-found=true
+  run_cmd kubectl delete deployment "$DEMO_MANUAL_DEPLOY" -n "$DEMO_NS" --ignore-not-found=true
+  pause
+else
+  print_step "1f - Skipping cleanup..."
+  print_info "Cleanup was skipped because the retry is expected to succeed once the webhook cache observes the event deletion."
+  pause
+fi
