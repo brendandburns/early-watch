@@ -116,3 +116,8 @@ else
   print_error "Update still denied. Verify event cleanup and retry."
 fi
 pause
+
+print_step "1f - Cleaning up..."
+run_cmd kubectl delete changevalidator "$DEMO_MANUAL_CV" -n "$DEMO_NS" --ignore-not-found=true
+run_cmd kubectl delete deployment "$DEMO_MANUAL_DEPLOY" -n "$DEMO_NS" --ignore-not-found=true
+pause
