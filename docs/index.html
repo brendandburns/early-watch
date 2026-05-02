@@ -1216,33 +1216,24 @@ spec:
     <div class="step reveal">
       <div class="step-num">1</div>
       <div class="step-body">
-        <h4>Install the CRD</h4>
-        <p>Register the <code class="code-inline">ChangeValidator</code> custom resource definition in your cluster.</p>
-        <pre style="margin-top:.6rem"><code class="language-bash">kubectl apply -f config/crd/bases/earlywatch.io_changevalidators.yaml</code></pre>
+        <h4>Download watchctl</h4>
+        <p>Download the <code class="code-inline">watchctl</code> CLI for your platform from the <a href="https://github.com/brendandburns/early-watch/releases/latest" target="_blank" rel="noopener">latest release</a>, or build it from source.</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">go build -o watchctl ./cmd/watchctl/...</code></pre>
       </div>
     </div>
 
     <div class="step reveal reveal-delay-1">
       <div class="step-num">2</div>
       <div class="step-body">
-        <h4>Create namespace &amp; RBAC</h4>
-        <p>Set up the dedicated namespace and the least-privilege service account.</p>
-        <pre style="margin-top:.6rem"><code class="language-bash">kubectl create namespace early-watch-system
-kubectl apply -f config/rbac/</code></pre>
+        <h4>Install EarlyWatch onto your cluster</h4>
+        <p>Run <code class="code-inline">watchctl install</code> to apply the CRD, RBAC, webhook Deployment, and <code class="code-inline">ValidatingWebhookConfiguration</code> in the correct order. Running it multiple times is safe (idempotent).</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">watchctl install</code></pre>
+        <p style="margin-top:.6rem">Use <code class="code-inline">--image</code> to specify a custom container image, or <code class="code-inline">--manual-touch</code> to also install the audit-monitor. See the <a href="https://github.com/brendandburns/early-watch/blob/main/docs/cli/install.md" target="_blank" rel="noopener">CLI reference</a> for all flags.</p>
       </div>
     </div>
 
     <div class="step reveal reveal-delay-2">
       <div class="step-num">3</div>
-      <div class="step-body">
-        <h4>Deploy the webhook server</h4>
-        <p>Deploy the EarlyWatch admission webhook (TLS certificates must be available via cert-manager).</p>
-        <pre style="margin-top:.6rem"><code class="language-bash">kubectl apply -f config/webhook/</code></pre>
-      </div>
-    </div>
-
-    <div class="step reveal reveal-delay-3">
-      <div class="step-num">4</div>
       <div class="step-body">
         <h4>Apply a ChangeValidator</h4>
         <p>Deploy the sample policy that prevents Service deletion while matching Pods are running.</p>
@@ -1250,8 +1241,8 @@ kubectl apply -f config/rbac/</code></pre>
       </div>
     </div>
 
-    <div class="step reveal reveal-delay-4">
-      <div class="step-num">5</div>
+    <div class="step reveal reveal-delay-3">
+      <div class="step-num">4</div>
       <div class="step-body">
         <h4>Test it!</h4>
         <p>Try deleting a Service while its matching Pods are running. EarlyWatch will deny the request with a clear error.</p>
