@@ -1226,8 +1226,8 @@ spec:
       <div class="step-num">2</div>
       <div class="step-body">
         <h4>Install EarlyWatch onto your cluster</h4>
-        <p>Run <code class="code-inline">watchctl install</code> to apply the CRD, RBAC, webhook Deployment, and <code class="code-inline">ValidatingWebhookConfiguration</code> in the correct order. Running it multiple times is safe (idempotent).</p>
-        <pre style="margin-top:.6rem"><code class="language-bash">watchctl install</code></pre>
+        <p>Run <code class="code-inline">./watchctl install</code> to apply the CRD, RBAC, webhook Deployment, and <code class="code-inline">ValidatingWebhookConfiguration</code> in the correct order. Running it multiple times is safe (idempotent).</p>
+        <pre style="margin-top:.6rem"><code class="language-bash">./watchctl install</code></pre>
         <p style="margin-top:.6rem">Use <code class="code-inline">--image</code> to specify a custom container image, or <code class="code-inline">--manual-touch</code> to also install the audit-monitor. See the <a href="https://github.com/brendandburns/early-watch/blob/main/docs/cli/install.md" target="_blank" rel="noopener">CLI reference</a> for all flags.</p>
       </div>
     </div>
