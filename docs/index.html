@@ -1208,8 +1208,9 @@ spec:
   <p class="section-label reveal">Getting Started</p>
   <h2 class="section-title reveal reveal-delay-1">Up and running in minutes</h2>
   <p class="section-sub reveal reveal-delay-2">
-    EarlyWatch requires a Kubernetes cluster (v1.26+), <code class="code-inline">kubectl</code>,
-    and <a href="https://cert-manager.io/" target="_blank" rel="noopener">cert-manager</a> for TLS.
+    EarlyWatch requires a Kubernetes cluster (v1.26+) and <code class="code-inline">kubectl</code>.
+    TLS is provisioned automatically by <code class="code-inline">watchctl install</code> using a self-signed CA.
+    <a href="https://cert-manager.io/" target="_blank" rel="noopener">cert-manager</a> (or an external CA) is only needed when using the <code class="code-inline">--no-api-server-cert-signing</code> flag.
   </p>
 
   <div class="steps">
