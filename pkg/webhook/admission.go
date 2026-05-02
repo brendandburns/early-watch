@@ -1109,24 +1109,35 @@ func (h *AdmissionHandler) serviceHasReadyPods(
 	namespace string,
 	selectorMap map[string]string,
 ) (bool, error) {
+	const podListPageSize int64 = 500
+
 	sel := labels.SelectorFromSet(labels.Set(selectorMap))
 	gvr := schema.GroupVersionResource{
 		Group:    "",
 		Version:  "v1",
 		Resource: "pods",
 	}
-	result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: sel.String(),
-	})
-	if err != nil {
-		return false, fmt.Errorf("listing Pods: %w", err)
-	}
-	for i := range result.Items {
-		if isPodReady(result.Items[i].Object) {
-			return true, nil
+
+	continueToken := ""
+	for {
+		result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: sel.String(),
+			Limit:         podListPageSize,
+			Continue:      continueToken,
+		})
+		if err != nil {
+			return false, fmt.Errorf("listing Pods: %w", err)
 		}
+		for i := range result.Items {
+			if isPodReady(result.Items[i].Object) {
+				return true, nil
+			}
+		}
+		if result.GetContinue() == "" {
+			return false, nil
+		}
+		continueToken = result.GetContinue()
 	}
-	return false, nil
 }
 
 // isPodReady returns true if the Pod's unstructured object has a Ready
