@@ -400,8 +400,8 @@ type ApprovalCheck struct {
 
 // ServicePodSelectorCheck configures the service-to-pod selector safety check.
 // It prevents a Service UPDATE from dropping all ready Pod references when the
-// service previously had at least one ready matching Pod.  Headless services
-// (spec.clusterIP == "None") that carry no selector are exempt from this check.
+// service previously had at least one ready matching Pod. Headless services
+// (spec.clusterIP == "None") are exempt from this check.
 type ServicePodSelectorCheck struct{}
 
 // DataKeySafetyCheck describes a check that prevents UPDATE requests from
