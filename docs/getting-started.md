@@ -63,6 +63,16 @@ kubectl delete service my-service
 # Service "my-service" cannot be deleted because Pods that match its label selector are still running.
 ```
 
+### Cluster-Wide Policies with ClusterChangeValidator
+
+To enforce a policy across **all** namespaces without repeating a `ChangeValidator` in every namespace, use `ClusterChangeValidator`.  For example, the sample below blocks deletion of Services in any namespace labelled `env=prod`:
+
+```bash
+kubectl apply -f config/samples/cluster_protect_prod_services.yaml
+```
+
+Use `spec.subject.namespaceSelector` to target specific namespaces, or omit it to apply the policy everywhere.  See the [ClusterChangeValidator CRD reference](custom-resources/cluster-change-validator.md) for details.
+
 ---
 
 ## Next Steps
@@ -71,6 +81,7 @@ kubectl delete service my-service
 |-------|------|
 | How EarlyWatch works end-to-end | [architecture.md](architecture.md) |
 | ChangeValidator CRD reference | [custom-resources/change-validator.md](custom-resources/change-validator.md) |
+| ClusterChangeValidator CRD reference | [custom-resources/cluster-change-validator.md](custom-resources/cluster-change-validator.md) |
 | All rule types | [rule-types/](rule-types/) |
 | Manual cluster deployment (without watchctl) | [deployment/cluster-setup.md](deployment/cluster-setup.md) |
 | CLI reference | [cli/watchctl.md](cli/watchctl.md) |

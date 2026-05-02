@@ -15,6 +15,7 @@
 #   demo-manual-touch-check.sh         — Block update after recent manual touch
 #   demo-service-pod-selector-check.sh — Block Service selector drop-to-zero updates
 #   demo-data-key-safety-check.sh      — Block ConfigMap/Secret key removal while referenced
+#   demo-cluster-change-validator.sh   — Block Service deletion via cluster-scoped validator
 #
 # Run scripts/demo-setup.sh first to create the kind cluster and download
 # watchctl, then run this script.
@@ -38,7 +39,10 @@
 #                               a Kubernetes Secret named "pullsecret" in the early-watch-system
 #                               namespace from this file (optional).
 #   --demos=<list>              Comma-separated list of demo names to run (default: all).
-#                               Examples: --demos=service   --demos=approval   --demos=service,approval
+#                               Examples: --demos=service   --demos=approval   --demos=service,clustervalidator
+#                               Valid keys: service, configmap, annotation, approval, checklock,
+#                               expression, manualtouch, servicepodselector, datakeysafety,
+#                               clustervalidator
 set -euo pipefail
 
 # ── Shared utilities ─────────────────────────────────────────────────────────
@@ -70,6 +74,7 @@ ALL_DEMOS=(
   manualtouch
   servicepodselector
   datakeysafety
+  clustervalidator
 )
 DEMOS=()
 if [ -z "$DEMOS_ARG" ]; then
@@ -249,6 +254,7 @@ _demo_selected expression && echo "  • A request blocked by an expression that
 _demo_selected manualtouch && echo "  • An UPDATE blocked while a recent manual touch event exists"
 _demo_selected servicepodselector && echo "  • A Service UPDATE blocked when a selector change would match zero Pods"
 _demo_selected datakeysafety && echo "  • A ConfigMap key removal blocked while a Pod still references that key"
+_demo_selected clustervalidator && echo "  • A ClusterChangeValidator blocking Service deletion in labelled namespaces"
 echo "  • Operations succeeding once each safety condition is satisfied"
 echo ""
 echo "${DIM}Estimated run time: ~$((${#DEMOS[@]} + 1)) minute(s)  (≈1 min per demo + 1 min for install/uninstall)${RESET}"
@@ -302,6 +308,11 @@ if _demo_selected datakeysafety; then
   source "$SCRIPTS_DIR/demo-data-key-safety-check.sh"
 fi
 
+if _demo_selected clustervalidator; then
+  # shellcheck source=scripts/demo-cluster-change-validator.sh
+  source "$SCRIPTS_DIR/demo-cluster-change-validator.sh"
+fi
+
 # ── Uninstall ────────────────────────────────────────────────────────────────
 print_header "Uninstall EarlyWatch"
 print_info "watchctl uninstall removes all EarlyWatch components from the cluster"
@@ -346,6 +357,7 @@ _demo_selected expression && echo "  ${GREEN}✔${RESET}  Denying a targeted req
 _demo_selected manualtouch && echo "  ${GREEN}✔${RESET}  Blocking UPDATE while recent manual touch events exist"
 _demo_selected servicepodselector && echo "  ${GREEN}✔${RESET}  Blocking Service selector updates that drop to zero Pods"
 _demo_selected datakeysafety && echo "  ${GREEN}✔${RESET}  Blocking ConfigMap key removal while a Pod still references it"
+_demo_selected clustervalidator && echo "  ${GREEN}✔${RESET}  Blocking Service deletion via ClusterChangeValidator (namespace label filter)"
 echo "  ${GREEN}✔${RESET}  Allowing operations once safety conditions are met"
 echo "  ${GREEN}✔${RESET}  Cleanly uninstalled from the cluster"
 echo ""
