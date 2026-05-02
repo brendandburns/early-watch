@@ -207,7 +207,7 @@ const (
 
 	// RuleTypeServicePodSelectorCheck denies an UPDATE to a Service when the
 	// service previously selected at least one ready Pod but would select no
-	// ready Pods after the change.  Headless services with no selector are exempt.
+	// ready Pods after the change.  Headless services are exempt.
 	RuleTypeServicePodSelectorCheck RuleType = "ServicePodSelectorCheck"
 
 	// RuleTypeDataKeySafetyCheck denies an UPDATE when a data key is removed
