@@ -54,8 +54,7 @@ func init() {
 func runListTouches(_ *cobra.Command, _ []string) error {
 	format := ewlisttouches.OutputFormat(listTouchesFlags.output)
 	if format != ewlisttouches.OutputFormatTable && format != ewlisttouches.OutputFormatCSV {
-		fmt.Fprintf(os.Stderr, "error: unsupported output format %q; supported values: table, csv\n", listTouchesFlags.output)
-		return fmt.Errorf("unsupported output format: %q", listTouchesFlags.output)
+		return fmt.Errorf("unsupported output format %q; supported values: table, csv", listTouchesFlags.output)
 	}
 	opts := ewlisttouches.Options{
 		Kubeconfig: listTouchesFlags.kubeconfig,
@@ -64,9 +63,5 @@ func runListTouches(_ *cobra.Command, _ []string) error {
 		Format:     format,
 	}
 
-	if err := ewlisttouches.Run(opts); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return err
-	}
-	return nil
+	return ewlisttouches.Run(opts)
 }

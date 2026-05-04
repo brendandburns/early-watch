@@ -102,10 +102,14 @@ func Run(opts Options) error {
 		return err
 	}
 
-	if opts.Format == OutputFormatCSV {
+	switch opts.Format {
+	case OutputFormatCSV:
 		return PrintCSV(opts.Output, list.Items)
+	case OutputFormatTable:
+		return PrintTable(opts.Output, list.Items)
+	default:
+		return fmt.Errorf("unsupported output format %q; supported values: %q, %q", opts.Format, OutputFormatTable, OutputFormatCSV)
 	}
-	return PrintTable(opts.Output, list.Items)
 }
 
 // PrintTable writes a human-readable table of ManualTouchEvents to w.
@@ -136,6 +140,7 @@ func PrintTable(w io.Writer, events []ewv1alpha1.ManualTouchEvent) error {
 // monitor_name, monitor_namespace.
 func PrintCSV(w io.Writer, events []ewv1alpha1.ManualTouchEvent) error {
 	cw := csv.NewWriter(w)
+	cw.UseCRLF = true
 	if err := cw.Write([]string{
 		"namespace", "name", "timestamp", "user", "user_agent", "operation",
 		"api_group", "resource", "resource_name", "resource_namespace",
