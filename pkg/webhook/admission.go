@@ -1139,9 +1139,9 @@ func keyReferenceExistsAtPath(current interface{}, parts []string, refName, data
 }
 
 // evaluateServicePodSelectorCheck denies an UPDATE to a Service when the
-// service previously selected at least one Pod but would select no Pods after
-// the change.  The check is a no-op for non-UPDATE requests and for headless
-// services (spec.clusterIP == "None").
+// service previously selected at least one ready Pod but would select no ready
+// Pods after the change.  The check is a no-op for non-UPDATE requests and for
+// headless services (spec.clusterIP == "None").
 func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
 	ctx context.Context,
 	message string,
@@ -1175,17 +1175,17 @@ func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
 		return false, "", nil
 	}
 
-	// Check whether the old service actually had matching Pods.
-	oldHasPods, err := h.serviceHasMatchingPods(ctx, req.Namespace, oldSelector)
+	// Check whether the old service actually had ready Pods.
+	oldHasReadyPods, err := h.serviceHasReadyPods(ctx, req.Namespace, oldSelector)
 	if err != nil {
 		return false, "", fmt.Errorf("checking pods for old service selector: %w", err)
 	}
-	if !oldHasPods {
-		// Previously no matching Pods – the change is safe.
+	if !oldHasReadyPods {
+		// Previously no ready Pods – the change is safe.
 		return false, "", nil
 	}
 
-	// Old service had matching Pods.  Check if the new service also selects Pods.
+	// Old service had ready Pods.  Check if the new service also selects ready Pods.
 	newRaw := req.Object.Raw
 	if len(newRaw) == 0 {
 		return false, "", nil
@@ -1203,38 +1203,80 @@ func (h *AdmissionHandler) evaluateServicePodSelectorCheck(
 		return true, renderMessage(message, req), nil
 	}
 
-	newHasPods, err := h.serviceHasMatchingPods(ctx, req.Namespace, newSelector)
+	newHasReadyPods, err := h.serviceHasReadyPods(ctx, req.Namespace, newSelector)
 	if err != nil {
 		return false, "", fmt.Errorf("checking pods for new service selector: %w", err)
 	}
-	if !newHasPods {
+	if !newHasReadyPods {
 		return true, renderMessage(message, req), nil
 	}
 
 	return false, "", nil
 }
 
-// serviceHasMatchingPods reports whether any Pods in the given namespace match
-// the provided label selector map.
-func (h *AdmissionHandler) serviceHasMatchingPods(
+// serviceHasReadyPods reports whether any Pods in the given namespace match
+// the provided label selector map and have a Ready condition with status True.
+func (h *AdmissionHandler) serviceHasReadyPods(
 	ctx context.Context,
 	namespace string,
 	selectorMap map[string]string,
 ) (bool, error) {
+	const podListPageSize int64 = 500
+
 	sel := labels.SelectorFromSet(labels.Set(selectorMap))
 	gvr := schema.GroupVersionResource{
 		Group:    "",
 		Version:  "v1",
 		Resource: "pods",
 	}
-	result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: sel.String(),
-		Limit:         1,
-	})
-	if err != nil {
-		return false, fmt.Errorf("listing Pods: %w", err)
+
+	continueToken := ""
+	for {
+		result, err := h.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: sel.String(),
+			Limit:         podListPageSize,
+			Continue:      continueToken,
+		})
+		if err != nil {
+			return false, fmt.Errorf("listing Pods: %w", err)
+		}
+		for i := range result.Items {
+			if isPodReady(result.Items[i].Object) {
+				return true, nil
+			}
+		}
+		if result.GetContinue() == "" {
+			return false, nil
+		}
+		continueToken = result.GetContinue()
 	}
-	return len(result.Items) > 0, nil
+}
+
+// isPodReady returns true if the Pod's unstructured object has a Ready
+// condition with status True.
+func isPodReady(obj map[string]interface{}) bool {
+	status, ok := obj["status"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	conditionsRaw, ok := status["conditions"]
+	if !ok {
+		return false
+	}
+	conditions, ok := conditionsRaw.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, c := range conditions {
+		cond, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if cond["type"] == string(corev1.PodReady) && cond["status"] == string(corev1.ConditionTrue) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseServiceSelectorAndClusterIP extracts spec.selector (as a

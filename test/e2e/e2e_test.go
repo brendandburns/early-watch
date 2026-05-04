@@ -357,6 +357,23 @@ func makePod(t *testing.T, name string, labels map[string]string) *corev1.Pod {
 	return pod
 }
 
+// setPodReady patches the given Pod's status to mark it as Ready.  In envtest
+// there is no kubelet to transition pod conditions, so tests that rely on the
+// serviceHasReadyPods check must call this helper after creating the pod.
+func setPodReady(t *testing.T, pod *corev1.Pod) {
+	t.Helper()
+	pod.Status.Conditions = []corev1.PodCondition{
+		{
+			Type:               corev1.PodReady,
+			Status:             corev1.ConditionTrue,
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	if err := k8sClient.Status().Update(context.Background(), pod); err != nil {
+		t.Fatalf("set pod %q ready: %v", pod.Name, err)
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 // --- approval-check helper ---
@@ -1174,7 +1191,8 @@ func TestServicePodSelectorCheck_DeniesWhenOldSelectorHadPods(t *testing.T) {
 	cleanupNamespace(t)
 	t.Cleanup(func() { cleanupNamespace(t) })
 
-	makePod(t, "app-pod", map[string]string{"app": "my-app"})
+	pod := makePod(t, "app-pod", map[string]string{"app": "my-app"})
+	setPodReady(t, pod)
 	svc := makeService(t, "my-svc", map[string]string{"app": "my-app"})
 	makeServicePodSelectorGuard(t, "svc-selector-guard")
 
@@ -1199,8 +1217,10 @@ func TestServicePodSelectorCheck_AllowsWhenNewSelectorStillHasPods(t *testing.T)
 	cleanupNamespace(t)
 	t.Cleanup(func() { cleanupNamespace(t) })
 
-	makePod(t, "app-pod-old", map[string]string{"app": "my-app"})
-	makePod(t, "app-pod-new", map[string]string{"app": "new-app"})
+	podOld := makePod(t, "app-pod-old", map[string]string{"app": "my-app"})
+	setPodReady(t, podOld)
+	podNew := makePod(t, "app-pod-new", map[string]string{"app": "new-app"})
+	setPodReady(t, podNew)
 	svc := makeService(t, "my-svc-keep", map[string]string{"app": "my-app"})
 	makeServicePodSelectorGuard(t, "svc-selector-guard-allow")
 

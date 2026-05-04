@@ -2331,6 +2331,26 @@ func serviceObj(selector map[string]string, clusterIP string) map[string]interfa
 	}
 }
 
+// readyPod returns a Pod with the given name, namespace, and labels that has a
+// Ready condition with status True.
+func readyPod(name, namespace string, lbls map[string]string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels:    lbls,
+		},
+		Status: corev1.PodStatus{
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+}
+
 // newServicePodSelectorGuard builds a ChangeValidator that uses the
 // ServicePodSelectorCheck rule to protect Service UPDATE operations.
 func newServicePodSelectorGuard() *ewv1alpha1.ChangeValidator {
@@ -2859,16 +2879,10 @@ func TestServicePodSelectorCheck_HeadlessWithSelector_Allowed(t *testing.T) {
 
 // TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied
 // verifies that a service with spec.selector: {} (matches all pods) is denied
-// when the new selector would match no pods.
+// when the new selector would match no ready pods.
 func TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "my-app"},
-		},
-	}
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
 	h := &AdmissionHandler{DynamicClient: fakeDynamic}
 
@@ -2888,16 +2902,10 @@ func TestServicePodSelectorCheck_EmptySelector_OldMatchesAll_NewNoPods_Denied(t 
 }
 
 // TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed verifies
-// that changing to spec.selector: {} (matches all pods) is allowed when pods exist.
+// that changing to spec.selector: {} (matches all pods) is allowed when ready pods exist.
 func TestServicePodSelectorCheck_EmptySelector_NewMatchesAll_Allowed(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "my-app"},
-		},
-	}
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
 	h := &AdmissionHandler{DynamicClient: fakeDynamic}
 
@@ -2937,16 +2945,10 @@ func TestServicePodSelectorCheck_OldNoPods_Allowed(t *testing.T) {
 }
 
 // TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed verifies that
-// when the new service also selects pods, the change is allowed.
+// when the new service also selects ready pods, the change is allowed.
 func TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "my-app"},
-		},
-	}
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
 	h := &AdmissionHandler{DynamicClient: fakeDynamic}
 
@@ -2960,21 +2962,15 @@ func TestServicePodSelectorCheck_OldHadPods_NewHasPods_Allowed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if violated {
-		t.Error("expected change to be allowed when new service still has matching pods")
+		t.Error("expected change to be allowed when new service still has matching ready pods")
 	}
 }
 
 // TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied verifies that
-// removing the selector is denied when the old service had matching pods.
+// removing the selector is denied when the old service had matching ready pods.
 func TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "my-app"},
-		},
-	}
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
 	h := &AdmissionHandler{DynamicClient: fakeDynamic}
 
@@ -2987,7 +2983,7 @@ func TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !violated {
-		t.Error("expected change to be denied when new service has no selector but old had pods")
+		t.Error("expected change to be denied when new service has no selector but old had ready pods")
 	}
 	if msg != "selector change denied" {
 		t.Errorf("unexpected message: %q", msg)
@@ -2995,16 +2991,10 @@ func TestServicePodSelectorCheck_OldHadPods_NewNoSelector_Denied(t *testing.T) {
 }
 
 // TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied verifies that
-// changing the selector so no pods match is denied when the old service had pods.
+// changing the selector so no ready pods match is denied when the old service had ready pods.
 func TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied(t *testing.T) {
 	scheme := newHandlerScheme(t)
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "my-app"},
-		},
-	}
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
 	h := &AdmissionHandler{DynamicClient: fakeDynamic}
 
@@ -3017,15 +3007,15 @@ func TestServicePodSelectorCheck_OldHadPods_NewNoPods_Denied(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !violated {
-		t.Error("expected change to be denied when new selector matches no pods but old had pods")
+		t.Error("expected change to be denied when new selector matches no ready pods but old had ready pods")
 	}
 }
 
-// TestHandle_ServicePodSelectorCheck_Denied is an integration test that verifies
-// the full Handle path denies a Service UPDATE that would drop all pod references.
-func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
+// TestServicePodSelectorCheck_OldHadPodsButNoneReady_Allowed verifies that
+// when the old service had matching pods but none were ready, the change is allowed.
+func TestServicePodSelectorCheck_OldHadPodsButNoneReady_Allowed(t *testing.T) {
 	scheme := newHandlerScheme(t)
-
+	// Pod exists but has no Ready condition (i.e. not ready).
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "my-pod",
@@ -3033,6 +3023,28 @@ func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
 			Labels:    map[string]string{"app": "my-app"},
 		},
 	}
+	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
+	h := &AdmissionHandler{DynamicClient: fakeDynamic}
+
+	oldSvc := serviceObj(map[string]string{"app": "my-app"}, "")
+	newSvc := serviceObj(map[string]string{"app": "other-app"}, "")
+	req := makeUpdateRequestFull("", "services", "default", "my-svc", oldSvc, newSvc)
+
+	violated, _, err := h.evaluateServicePodSelectorCheck(context.Background(), "msg", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if violated {
+		t.Error("expected change to be allowed when old service had no ready pods")
+	}
+}
+
+// TestHandle_ServicePodSelectorCheck_Denied is an integration test that verifies
+// the full Handle path denies a Service UPDATE that would drop all ready pod references.
+func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
+	scheme := newHandlerScheme(t)
+
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	guard := newServicePodSelectorGuard()
 	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
@@ -3045,22 +3057,16 @@ func TestHandle_ServicePodSelectorCheck_Denied(t *testing.T) {
 
 	resp := h.Handle(context.Background(), req)
 	if resp.Allowed {
-		t.Error("expected Handle to deny service UPDATE that drops all pod references")
+		t.Error("expected Handle to deny service UPDATE that drops all ready pod references")
 	}
 }
 
 // TestHandle_ServicePodSelectorCheck_Allowed verifies that a Service UPDATE
-// which keeps matching pods is allowed.
+// which keeps matching ready pods is allowed.
 func TestHandle_ServicePodSelectorCheck_Allowed(t *testing.T) {
 	scheme := newHandlerScheme(t)
 
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "my-pod",
-			Namespace: "default",
-			Labels:    map[string]string{"app": "my-app"},
-		},
-	}
+	pod := readyPod("my-pod", "default", map[string]string{"app": "my-app"})
 	guard := newServicePodSelectorGuard()
 	fakeClient := clientfake.NewClientBuilder().WithScheme(scheme).WithObjects(guard).Build()
 	fakeDynamic := dynamicfake.NewSimpleDynamicClient(scheme, pod)
