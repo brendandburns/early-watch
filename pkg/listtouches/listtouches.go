@@ -4,6 +4,7 @@ package listtouches
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"text/tabwriter"
@@ -14,6 +15,16 @@ import (
 
 	ewv1alpha1 "github.com/brendandburns/early-watch/pkg/apis/earlywatch/v1alpha1"
 	internalapply "github.com/brendandburns/early-watch/pkg/internal/apply"
+)
+
+// OutputFormat controls how list-touches results are rendered.
+type OutputFormat string
+
+const (
+	// OutputFormatTable renders results as a human-readable table (default).
+	OutputFormatTable OutputFormat = "table"
+	// OutputFormatCSV renders results as RFC 4180 CSV.
+	OutputFormatCSV OutputFormat = "csv"
 )
 
 // Options holds the parameters for a list-touches operation.
@@ -28,6 +39,9 @@ type Options struct {
 
 	// Output is the writer to print results to.
 	Output io.Writer
+
+	// Format selects the output format. Defaults to OutputFormatTable.
+	Format OutputFormat
 }
 
 // BuildScheme returns a *runtime.Scheme that includes the earlywatch.io
@@ -76,7 +90,7 @@ func List(ctx context.Context, c k8sclient.Client, namespace string) (*ewv1alpha
 }
 
 // Run builds a Kubernetes client, lists ManualTouchEvent resources, and
-// writes the results as a human-readable table to opts.Output.
+// writes the results to opts.Output in the requested format.
 func Run(opts Options) error {
 	c, err := BuildClient(opts.Kubeconfig)
 	if err != nil {
@@ -88,7 +102,14 @@ func Run(opts Options) error {
 		return err
 	}
 
-	return PrintTable(opts.Output, list.Items)
+	switch opts.Format {
+	case OutputFormatCSV:
+		return PrintCSV(opts.Output, list.Items)
+	case OutputFormatTable:
+		return PrintTable(opts.Output, list.Items)
+	default:
+		return fmt.Errorf("unsupported output format %q; supported values: %q, %q", opts.Format, OutputFormatTable, OutputFormatCSV)
+	}
 }
 
 // PrintTable writes a human-readable table of ManualTouchEvents to w.
@@ -111,6 +132,44 @@ func PrintTable(w io.Writer, events []ewv1alpha1.ManualTouchEvent) error {
 		}
 	}
 	return tw.Flush()
+}
+
+// PrintCSV writes ManualTouchEvents to w as RFC 4180 CSV with a header row.
+// Each row contains: namespace, name, timestamp, user, user_agent, operation,
+// api_group, resource, resource_name, resource_namespace, source_ip, audit_id,
+// monitor_name, monitor_namespace.
+func PrintCSV(w io.Writer, events []ewv1alpha1.ManualTouchEvent) error {
+	cw := csv.NewWriter(w)
+	cw.UseCRLF = true
+	if err := cw.Write([]string{
+		"namespace", "name", "timestamp", "user", "user_agent", "operation",
+		"api_group", "resource", "resource_name", "resource_namespace",
+		"source_ip", "audit_id", "monitor_name", "monitor_namespace",
+	}); err != nil {
+		return err
+	}
+	for _, e := range events {
+		if err := cw.Write([]string{
+			e.Namespace,
+			e.Name,
+			e.Spec.Timestamp.UTC().Format(time.RFC3339),
+			e.Spec.User,
+			e.Spec.UserAgent,
+			e.Spec.Operation,
+			e.Spec.APIGroup,
+			e.Spec.Resource,
+			e.Spec.ResourceName,
+			e.Spec.ResourceNamespace,
+			e.Spec.SourceIP,
+			e.Spec.AuditID,
+			e.Spec.MonitorName,
+			e.Spec.MonitorNamespace,
+		}); err != nil {
+			return err
+		}
+	}
+	cw.Flush()
+	return cw.Error()
 }
 
 // formatAge returns a short human-readable string representing d.

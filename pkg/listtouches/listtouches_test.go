@@ -74,7 +74,100 @@ func TestPrintTable_MultipleEvents(t *testing.T) {
 	}
 }
 
-// --- List tests ---
+// --- PrintCSV tests ---
+
+func TestPrintCSV_EmptyList(t *testing.T) {
+	var buf bytes.Buffer
+	if err := PrintCSV(&buf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "namespace") {
+		t.Errorf("expected CSV header row, got: %q", got)
+	}
+	lines := strings.Split(strings.TrimSpace(got), "\n")
+	if len(lines) != 1 {
+		t.Errorf("expected only header row, got %d lines", len(lines))
+	}
+}
+
+func TestPrintCSV_SingleEvent(t *testing.T) {
+	e := makeEvent("mte-1", "default", "admin", "DELETE", "services", "my-svc", 5*time.Minute)
+	var buf bytes.Buffer
+	if err := PrintCSV(&buf, []ewv1alpha1.ManualTouchEvent{e}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"namespace", "name", "default", "mte-1", "admin", "DELETE", "services", "my-svc"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in CSV output, got: %q", want, got)
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(got), "\n")
+	if len(lines) != 2 {
+		t.Errorf("expected header + 1 data row, got %d lines", len(lines))
+	}
+}
+
+func TestPrintCSV_MultipleEvents(t *testing.T) {
+	events := []ewv1alpha1.ManualTouchEvent{
+		makeEvent("mte-1", "default", "alice", "CREATE", "deployments", "app", time.Hour),
+		makeEvent("mte-2", "kube-system", "bob", "DELETE", "pods", "my-pod", 2*time.Hour),
+	}
+	var buf bytes.Buffer
+	if err := PrintCSV(&buf, events); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"alice", "bob", "CREATE", "DELETE", "app", "my-pod"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in CSV output, got: %q", want, got)
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(got), "\n")
+	if len(lines) != 3 {
+		t.Errorf("expected header + 2 data rows, got %d lines", len(lines))
+	}
+}
+
+func TestPrintCSV_AllFields(t *testing.T) {
+	ts := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	e := ewv1alpha1.ManualTouchEvent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "mte-full",
+			Namespace:         "prod",
+			CreationTimestamp: metav1.NewTime(ts),
+		},
+		Spec: ewv1alpha1.ManualTouchEventSpec{
+			Timestamp:         metav1.NewTime(ts),
+			User:              "ci-bot",
+			UserAgent:         "kubectl/v1.29.0",
+			Operation:         "UPDATE",
+			APIGroup:          "apps",
+			Resource:          "deployments",
+			ResourceName:      "frontend",
+			ResourceNamespace: "prod",
+			SourceIP:          "10.0.0.1",
+			AuditID:           "audit-abc123",
+			MonitorName:       "mon-1",
+			MonitorNamespace:  "earlywatch",
+		},
+	}
+	var buf bytes.Buffer
+	if err := PrintCSV(&buf, []ewv1alpha1.ManualTouchEvent{e}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{
+		"prod", "mte-full", "2024-01-15T10:30:00Z", "ci-bot", "kubectl/v1.29.0",
+		"UPDATE", "apps", "deployments", "frontend", "10.0.0.1",
+		"audit-abc123", "mon-1", "earlywatch",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in CSV output, got: %q", want, got)
+		}
+	}
+}
 
 func TestList_AllNamespaces(t *testing.T) {
 	s, err := BuildScheme()
